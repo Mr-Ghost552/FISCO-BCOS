@@ -24,6 +24,7 @@
 #include <bcos-crypto/signature/codec/SignatureDataWithPub.h>
 #include <bcos-crypto/signature/hsmSM2/HsmSM2Crypto.h>
 #include <bcos-crypto/signature/hsmSM2/HsmSM2KeyPair.h>
+#include <algorithm>
 
 using namespace bcos;
 using namespace bcos::crypto;
@@ -77,7 +78,7 @@ std::shared_ptr<bytes> HsmSM2Crypto::sign(
     if (code != SDR_OK)
     {
         CRYPTO_LOG(ERROR) << "[HSMSignature::sign] ERROR of compute H(M')"
-                          << LOG_KV("error", provider.GetErrorMessage(code));
+                          << LOG_KV("message", provider.GetErrorMessage(code));
         return nullptr;
     }
 
@@ -88,7 +89,7 @@ std::shared_ptr<bytes> HsmSM2Crypto::sign(
     if (code != SDR_OK)
     {
         CRYPTO_LOG(ERROR) << "[HSMSignature::sign] ERROR of Sign"
-                          << LOG_KV("error", provider.GetErrorMessage(code));
+                          << LOG_KV("message", provider.GetErrorMessage(code));
         return nullptr;
     }
 
@@ -129,7 +130,7 @@ bool HsmSM2Crypto::verify(
     if (code != SDR_OK)
     {
         CRYPTO_LOG(ERROR) << "[HSMSignature::verify] ERROR of Hash"
-                          << LOG_KV("error", provider.GetErrorMessage(code));
+                          << LOG_KV("message", provider.GetErrorMessage(code));
         return false;
     }
 
@@ -138,7 +139,7 @@ bool HsmSM2Crypto::verify(
     if (code != SDR_OK)
     {
         CRYPTO_LOG(ERROR) << "[HSMSignature::verify] ERROR of Verify"
-                          << LOG_KV("error", provider.GetErrorMessage(code));
+                          << LOG_KV("message", provider.GetErrorMessage(code));
         return false;
     }
     return true;
@@ -166,7 +167,8 @@ std::pair<bool, bytes> HsmSM2Crypto::recoverAddress(Hash::Ptr _hashImpl, bytesCo
         h256 r;
         h256 s;
     } in;
-    memcpy(&in, _input.data(), std::min(_input.size(), sizeof(in)));
+    memcpy(&in, _input.data(),
+        std::min<size_t>(_input.size(), sizeof(in)));  // TODO: Fix this! memcpy on non-pod type!
     // verify the signature
     auto signatureData = std::make_shared<SignatureDataWithPub>(in.r, in.s, in.pub.ref());
     try
@@ -182,7 +184,7 @@ std::pair<bool, bytes> HsmSM2Crypto::recoverAddress(Hash::Ptr _hashImpl, bytesCo
     catch (const std::exception& e)
     {
         CRYPTO_LOG(WARNING) << LOG_DESC("Hsm SM2 recoverAddress failed")
-                            << LOG_KV("error", boost::diagnostic_information(e));
+                            << LOG_KV("message", boost::diagnostic_information(e));
     }
     return {false, {}};
 }

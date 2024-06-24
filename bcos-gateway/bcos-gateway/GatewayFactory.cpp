@@ -6,10 +6,10 @@
 #include "bcos-gateway/GatewayConfig.h"
 #include "bcos-gateway/libnetwork/SessionCallback.h"
 #include "bcos-gateway/libp2p/Service.h"
-#include "bcos-gateway/libratelimit/DistributedRateLimiter.h"
 #include "bcos-gateway/libratelimit/GatewayRateLimiter.h"
 #include "bcos-utilities/BoostLog.h"
 #include "bcos-utilities/Common.h"
+#include "bcos-utilities/ratelimiter/DistributedRateLimiter.h"
 #include <bcos-boostssl/context/Common.h>
 #include <bcos-crypto/signature/key/KeyFactoryImpl.h>
 #include <bcos-gateway/GatewayFactory.h>
@@ -23,21 +23,20 @@
 #include <bcos-gateway/libnetwork/PeerBlackWhitelistInterface.h>
 #include <bcos-gateway/libnetwork/Session.h>
 #include <bcos-gateway/libp2p/P2PMessageV2.h>
-#include <bcos-gateway/libp2p/Service.h>
 #include <bcos-gateway/libp2p/ServiceV2.h>
 #include <bcos-gateway/libp2p/router/RouterTableImpl.h>
-#include <bcos-gateway/libratelimit/GatewayRateLimiter.h>
 #include <bcos-gateway/libratelimit/RateLimiterManager.h>
-#include <bcos-gateway/libratelimit/TokenBucketRateLimiter.h>
 #include <bcos-tars-protocol/protocol/GroupInfoCodecImpl.h>
 #include <bcos-utilities/DataConvertUtility.h>
 #include <bcos-utilities/FileUtility.h>
 #include <bcos-utilities/IOServicePool.h>
+#include <bcos-utilities/ratelimiter/TokenBucketRateLimiter.h>
 #include <openssl/asn1.h>
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 #include <chrono>
 #include <exception>
+#include <optional>
 #include <thread>
 
 using namespace bcos::rpc;
@@ -55,6 +54,7 @@ struct GatewayP2PReloadHandler
 
     static void handle(int sig)
     {
+        std::unique_lock<std::mutex> lock(g_BCOSConfig.signalMutex());
         BCOS_LOG(INFO) << LOG_BADGE("Gateway::Signal") << LOG_DESC("receive SIGUSER1 sig");
 
         if (!config || !service)
@@ -67,6 +67,12 @@ struct GatewayP2PReloadHandler
             config->loadP2pConnectedNodes();
             auto nodes = config->connectedNodes();
             service->setStaticNodes(nodes);
+
+            config->loadPeerBlacklist();
+            service->updatePeerBlacklist(config->peerBlacklist(), config->enableBlacklist());
+
+            config->loadPeerWhitelist();
+            service->updatePeerWhitelist(config->peerWhitelist(), config->enableWhitelist());
 
             BCOS_LOG(INFO) << LOG_BADGE("Gateway::Signal")
                            << LOG_DESC("reload p2p connected nodes successfully")
@@ -93,7 +99,7 @@ void GatewayFactory::initCert2PubHexHandler()
         {
             GATEWAY_FACTORY_LOG(ERROR)
                 << LOG_DESC("initCert2PubHexHandler") << LOG_KV("cert", _cert)
-                << LOG_KV("errorMessage", "unable to load cert content, cert: " + _cert);
+                << LOG_KV("message", "unable to load cert content, cert: " + _cert);
             return false;
         }
 
@@ -111,7 +117,7 @@ void GatewayFactory::initCert2PubHexHandler()
         {
             GATEWAY_FACTORY_LOG(ERROR)
                 << LOG_DESC("initCert2PubHexHandler") << LOG_KV("cert", _cert)
-                << LOG_KV("errorMessage", "BIO_new error");
+                << LOG_KV("message", "BIO_new error");
             return false;
         }
 
@@ -128,7 +134,7 @@ void GatewayFactory::initCert2PubHexHandler()
         {
             GATEWAY_FACTORY_LOG(ERROR)
                 << LOG_DESC("initCert2PubHexHandler") << LOG_KV("cert", _cert)
-                << LOG_KV("errorMessage", "PEM_read_bio_X509 error");
+                << LOG_KV("message", "PEM_read_bio_X509 error");
             return false;
         }
 
@@ -147,7 +153,7 @@ void GatewayFactory::initSSLContextPubHexHandler()
         if (pubKey == NULL)
         {
             GATEWAY_FACTORY_LOG(ERROR)
-                << LOG_DESC("initSSLContextPubHexHandler X509_get0_pubkey_bitstr error");
+                << LOG_DESC("initSSLContextPubHexHandler X509_get0_pubkey_bitstr failed");
             return false;
         }
 
@@ -169,7 +175,7 @@ void GatewayFactory::initSSLContextPubHexHandlerWithoutExtInfo()
         if (nullptr == pKey)
         {
             GATEWAY_FACTORY_LOG(ERROR)
-                << LOG_DESC("initSSLContextPubHexHandler X509_get_pubkey error");
+                << LOG_DESC("initSSLContextPubHexHandler X509_get_pubkey failed");
             return false;
         }
 
@@ -180,7 +186,7 @@ void GatewayFactory::initSSLContextPubHexHandlerWithoutExtInfo()
             if (nullptr == rsa)
             {
                 GATEWAY_FACTORY_LOG(ERROR)
-                    << LOG_DESC("initSSLContextPubHexHandler EVP_PKEY_get0_RSA error");
+                    << LOG_DESC("initSSLContextPubHexHandler EVP_PKEY_get0_RSA failed");
                 return false;
             }
 
@@ -188,7 +194,7 @@ void GatewayFactory::initSSLContextPubHexHandlerWithoutExtInfo()
             if (nullptr == n)
             {
                 GATEWAY_FACTORY_LOG(ERROR)
-                    << LOG_DESC("initSSLContextPubHexHandler RSA_get0_n error");
+                    << LOG_DESC("initSSLContextPubHexHandler RSA_get0_n failed");
                 return false;
             }
 
@@ -200,7 +206,7 @@ void GatewayFactory::initSSLContextPubHexHandlerWithoutExtInfo()
             if (nullptr == ecPublicKey)
             {
                 GATEWAY_FACTORY_LOG(ERROR)
-                    << LOG_DESC("initSSLContextPubHexHandler EVP_PKEY_get1_EC_KEY error");
+                    << LOG_DESC("initSSLContextPubHexHandler EVP_PKEY_get1_EC_KEY failed");
                 return false;
             }
 
@@ -208,7 +214,7 @@ void GatewayFactory::initSSLContextPubHexHandlerWithoutExtInfo()
             if (nullptr == ecPoint)
             {
                 GATEWAY_FACTORY_LOG(ERROR)
-                    << LOG_DESC("initSSLContextPubHexHandler EC_KEY_get0_public_key error");
+                    << LOG_DESC("initSSLContextPubHexHandler EC_KEY_get0_public_key failed");
                 return false;
             }
 
@@ -216,7 +222,7 @@ void GatewayFactory::initSSLContextPubHexHandlerWithoutExtInfo()
             if (nullptr == ecGroup)
             {
                 GATEWAY_FACTORY_LOG(ERROR)
-                    << LOG_DESC("initSSLContextPubHexHandler EC_KEY_get0_group error");
+                    << LOG_DESC("initSSLContextPubHexHandler EC_KEY_get0_group failed");
                 return false;
             }
 
@@ -233,8 +239,9 @@ void GatewayFactory::initSSLContextPubHexHandlerWithoutExtInfo()
         }
         else
         {
-            GATEWAY_FACTORY_LOG(ERROR) << LOG_DESC("initSSLContextPubHexHandler unknown type error")
-                                       << LOG_KV("type", type);
+            GATEWAY_FACTORY_LOG(ERROR)
+                << LOG_DESC("initSSLContextPubHexHandler unknown type failed")
+                << LOG_KV("type", type);
 
             return false;
         }
@@ -352,7 +359,7 @@ std::shared_ptr<boost::asio::ssl::context> GatewayFactory::buildSSLContext(
             sslContext->native_handle(), _smCertConfig.nodeCert.c_str(), SSL_FILETYPE_PEM) <= 0)
     {
         ERR_print_errors_fp(stderr);
-        BOOST_THROW_EXCEPTION(std::runtime_error("SSL_CTX_use_certificate_file error"));
+        BOOST_THROW_EXCEPTION(std::runtime_error("SSL_CTX_use_certificate_file failed"));
     }
 
     std::shared_ptr<bytes> keyContent;
@@ -383,7 +390,7 @@ std::shared_ptr<boost::asio::ssl::context> GatewayFactory::buildSSLContext(
     if (!SSL_CTX_check_private_key(sslContext->native_handle()))
     {
         ERR_print_errors_fp(stderr);
-        BOOST_THROW_EXCEPTION(std::runtime_error("SSL_CTX_check_private_key error"));
+        BOOST_THROW_EXCEPTION(std::runtime_error("SSL_CTX_check_private_key failed"));
     }
 
     std::shared_ptr<bytes> enNodeKeyContent;
@@ -413,17 +420,17 @@ std::shared_ptr<boost::asio::ssl::context> GatewayFactory::buildSSLContext(
             sslContext->native_handle(), _smCertConfig.enNodeCert.c_str(), SSL_FILETYPE_PEM) <= 0)
     {
         ERR_print_errors_fp(stderr);
-        BOOST_THROW_EXCEPTION(std::runtime_error("SSL_CTX_use_enc_certificate_file error"));
+        BOOST_THROW_EXCEPTION(std::runtime_error("SSL_CTX_use_enc_certificate_file failed"));
     }
     std::string enNodeKeyStr((const char*)enNodeKeyContent->data(), enNodeKeyContent->size());
 
     if (SSL_CTX_use_enc_PrivateKey(sslContext->native_handle(), toEvpPkey(enNodeKeyStr.c_str())) <=
         0)
     {
-        GATEWAY_FACTORY_LOG(ERROR) << LOG_DESC("SSL_CTX_use_enc_PrivateKey error");
+        GATEWAY_FACTORY_LOG(ERROR) << LOG_DESC("SSL_CTX_use_enc_PrivateKey failed");
         BOOST_THROW_EXCEPTION(
             InvalidParameter() << errinfo_comment("GatewayFactory::buildSSLContext "
-                                                  "SSL_CTX_use_enc_PrivateKey error"));
+                                                  "SSL_CTX_use_enc_PrivateKey failed"));
     }
     auto caContent =
         readContentsToString(boost::filesystem::path(_smCertConfig.caCert));  // node.key content
@@ -465,10 +472,11 @@ std::shared_ptr<Gateway> GatewayFactory::buildGateway(const std::string& _config
         config->initConfig(_configPath, true);
     }
     config->loadP2pConnectedNodes();
+    config->setConfigFile(_configPath);
     return buildGateway(config, _airVersion, _entryPoint, _gatewayServiceName);
 }
 
-std::shared_ptr<ratelimiter::GatewayRateLimiter> GatewayFactory::buildGatewayRateLimiter(
+std::shared_ptr<gateway::ratelimiter::GatewayRateLimiter> GatewayFactory::buildGatewayRateLimiter(
     const GatewayConfig::RateLimiterConfig& _rateLimiterConfig,
     const GatewayConfig::RedisConfig& _redisConfig)
 {
@@ -491,7 +499,7 @@ std::shared_ptr<ratelimiter::GatewayRateLimiter> GatewayFactory::buildGatewayRat
     return gatewayRateLimiter;
 }
 
-std::shared_ptr<ratelimiter::RateLimiterManager> GatewayFactory::buildRateLimiterManager(
+std::shared_ptr<gateway::ratelimiter::RateLimiterManager> GatewayFactory::buildRateLimiterManager(
     const GatewayConfig::RateLimiterConfig& _rateLimiterConfig,
     std::shared_ptr<sw::redis::Redis> _redis)
 {
@@ -504,7 +512,7 @@ std::shared_ptr<ratelimiter::RateLimiterManager> GatewayFactory::buildRateLimite
     bool allowExceedMaxPermitSize = _rateLimiterConfig.allowExceedMaxPermitSize;
 
     // total outgoing bandwidth Limit for p2p network
-    ratelimiter::RateLimiterInterface::Ptr totalOutgoingRateLimiter = nullptr;
+    bcos::ratelimiter::RateLimiterInterface::Ptr totalOutgoingRateLimiter = nullptr;
     if (_rateLimiterConfig.totalOutgoingBwLimit > 0)
     {
         totalOutgoingRateLimiter = rateLimiterFactory->buildTimeWindowRateLimiter(
@@ -531,7 +539,7 @@ std::shared_ptr<ratelimiter::RateLimiterManager> GatewayFactory::buildRateLimite
     {
         for (const auto& [group, bandWidth] : _rateLimiterConfig.group2BwLimit)
         {
-            ratelimiter::RateLimiterInterface::Ptr rateLimiterInterface = nullptr;
+            bcos::ratelimiter::RateLimiterInterface::Ptr rateLimiterInterface = nullptr;
             if (_rateLimiterConfig.enableDistributedRatelimit)
             {
                 rateLimiterInterface = rateLimiterFactory->buildDistributedRateLimiter(
@@ -612,7 +620,6 @@ std::shared_ptr<Service> GatewayFactory::buildService(const GatewayConfig::Ptr& 
     // init Host
     auto host = std::make_shared<Host>(asioInterface, sessionFactory, messageFactory);
     host->setHostPort(_config->listenIP(), _config->listenPort());
-    host->setThreadPool(std::make_shared<ThreadPool>("P2P", _config->threadPoolSize()));
     host->setSSLContextPubHandler(m_sslContextPubHandler);
     host->setSSLContextPubHandlerWithoutExtInfo(m_sslContextPubHandlerWithoutExtInfo);
     host->setPeerBlacklist(peerBlacklist);
@@ -668,11 +675,6 @@ std::shared_ptr<Gateway> GatewayFactory::buildGateway(GatewayConfig::Ptr _config
         auto pubHex = service->id();
         auto keyFactory = service->keyFactory();
 
-        auto gatewayRateLimiter =
-            buildGatewayRateLimiter(_config->rateLimiterConfig(), _config->redisConfig());
-        auto gatewayRateLimiterWeakPtr =
-            std::weak_ptr<ratelimiter::GatewayRateLimiter>(gatewayRateLimiter);
-
         // init GatewayNodeManager
         GatewayNodeManager::Ptr gatewayNodeManager;
         AMOPImpl::Ptr amop;
@@ -680,7 +682,10 @@ std::shared_ptr<Gateway> GatewayFactory::buildGateway(GatewayConfig::Ptr _config
         {
             gatewayNodeManager =
                 std::make_shared<GatewayNodeManager>(_config->uuid(), pubHex, keyFactory, service);
-            amop = buildLocalAMOP(service, pubHex);
+            if (!_config->readonly())
+            {
+                amop = buildLocalAMOP(service, pubHex);
+            }
         }
         else
         {
@@ -695,11 +700,40 @@ std::shared_ptr<Gateway> GatewayFactory::buildGateway(GatewayConfig::Ptr _config
                 gatewayNodeManager = std::make_shared<ProGatewayNodeManager>(
                     _config->uuid(), pubHex, keyFactory, service);
             }
-            amop = buildAMOP(service, pubHex);
+
+            if (!_config->readonly())
+            {
+                amop = buildAMOP(service, pubHex);
+            }
+            else
+            {
+                // register a null amop message handler
+                service->registerHandlerByMsgType(GatewayMessageType::AMOPMessageType,
+                    [](const bcos::gateway::NetworkException& _e,
+                        const bcos::gateway::P2PSession::Ptr& session,
+                        const std::shared_ptr<bcos::gateway::P2PMessage>& message) {
+                        // 只读模式下, 不处理其它节点的amop消息
+                        // In read-only mode, AMOP messages from other nodes are not processed
+                        return;
+                    });
+            }
         }
+
+
+        std::shared_ptr<ratelimiter::GatewayRateLimiter> gatewayRateLimiter;
+        if (_config->rateLimiterConfig().enable)
+        {
+            gatewayRateLimiter =
+                buildGatewayRateLimiter(_config->rateLimiterConfig(), _config->redisConfig());
+        }
+
         // init Gateway
         auto gateway = std::make_shared<Gateway>(
-            m_chainID, service, gatewayNodeManager, amop, gatewayRateLimiter, _gatewayServiceName);
+            _config, service, gatewayNodeManager, amop, gatewayRateLimiter, _gatewayServiceName);
+        if (_config->readonly())
+        {
+            gateway->enableReadOnlyMode();
+        }
         auto gatewayNodeManagerWeakPtr = std::weak_ptr<GatewayNodeManager>(gatewayNodeManager);
         // register disconnect handler
         service->registerDisconnectHandler(
@@ -722,52 +756,59 @@ std::shared_ptr<Gateway> GatewayFactory::buildGateway(GatewayConfig::Ptr _config
                 nodeMgr->onRemoveNodeIDs(_unreachableNode);
             });
 
-        service->setBeforeMessageHandler([gatewayRateLimiterWeakPtr](SessionFace::Ptr _session,
-                                             Message::Ptr _msg) -> std::optional<bcos::Error> {
-            auto gatewayRateLimiter = gatewayRateLimiterWeakPtr.lock();
-            if (!gatewayRateLimiter)
-            {
+        if (gatewayRateLimiter)
+        {
+            auto gatewayRateLimiterWeakPtr =
+                std::weak_ptr<ratelimiter::GatewayRateLimiter>(gatewayRateLimiter);
+            service->setBeforeMessageHandler([gatewayRateLimiterWeakPtr](SessionFace::Ptr _session,
+                                                 Message::Ptr _msg) -> std::optional<bcos::Error> {
+                auto gatewayRateLimiter = gatewayRateLimiterWeakPtr.lock();
+                if (!gatewayRateLimiter)
+                {
+                    return std::nullopt;
+                }
+
+                GatewayMessageExtAttributes::Ptr msgExtAttributes = nullptr;
+                if (_msg->extAttributes())
+                {
+                    msgExtAttributes = std::dynamic_pointer_cast<GatewayMessageExtAttributes>(
+                        _msg->extAttributes());
+                }
+
+                std::string groupID =
+                    msgExtAttributes ? msgExtAttributes->groupID() : std::string();
+                uint16_t moduleID = msgExtAttributes ? msgExtAttributes->moduleID() : 0;
+                std::string endpoint = _session->nodeIPEndpoint().address();
+                int64_t msgLength = _msg->length();
+                auto pkgType = _msg->packetType();
+
+                auto result = gatewayRateLimiter->checkOutGoing(
+                    endpoint, pkgType, groupID, moduleID, msgLength);
+                return result ? std::make_optional(
+                                    bcos::Error::buildError("", OutBWOverflow, result.value())) :
+                                std::nullopt;
+            });
+
+            service->setOnMessageHandler([gatewayRateLimiterWeakPtr](SessionFace::Ptr _session,
+                                             Message::Ptr _message) -> std::optional<bcos::Error> {
+                auto gatewayRateLimiter = gatewayRateLimiterWeakPtr.lock();
+                if (!gatewayRateLimiter)
+                {
+                    return std::nullopt;
+                }
+
+                auto endpoint = _session->nodeIPEndpoint().address();
+                auto packetType = _message->packetType();
+                auto msgLength = _message->length();
+
+                auto result =
+                    gatewayRateLimiter->checkInComing(endpoint, packetType, msgLength, true);
+                return result ? std::make_optional(
+                                    bcos::Error::buildError("", InQPSOverflow, result.value())) :
+                                std::nullopt;
                 return std::nullopt;
-            }
-
-            GatewayMessageExtAttributes::Ptr msgExtAttributes = nullptr;
-            if (_msg->extAttributes())
-            {
-                msgExtAttributes =
-                    std::dynamic_pointer_cast<GatewayMessageExtAttributes>(_msg->extAttributes());
-            }
-
-            std::string groupID = msgExtAttributes ? msgExtAttributes->groupID() : std::string();
-            uint16_t moduleID = msgExtAttributes ? msgExtAttributes->moduleID() : 0;
-            std::string endpoint = _session->nodeIPEndpoint().address();
-            int64_t msgLength = _msg->length();
-            auto pkgType = _msg->packetType();
-
-            // bandwidth limit check
-            auto result =
-                gatewayRateLimiter->checkOutGoing(endpoint, pkgType, groupID, moduleID, msgLength);
-            return result ? std::make_optional(
-                                bcos::Error::buildError("", OutBWOverflow, result.value())) :
-                            std::nullopt;
-        });
-
-        service->setOnMessageHandler([gatewayRateLimiterWeakPtr](SessionFace::Ptr _session,
-                                         Message::Ptr _message) -> std::optional<bcos::Error> {
-            auto gatewayRateLimiter = gatewayRateLimiterWeakPtr.lock();
-            if (!gatewayRateLimiter)
-            {
-                return std::nullopt;
-            }
-
-            auto endpoint = _session->nodeIPEndpoint().address();
-            auto packetType = _message->packetType();
-            auto msgLength = _message->length();
-
-            auto result = gatewayRateLimiter->checkInComing(endpoint, packetType, msgLength, true);
-            return result ? std::make_optional(
-                                bcos::Error::buildError("", InQPSOverflow, result.value())) :
-                            std::nullopt;
-        });
+            });
+        }
 
         GATEWAY_FACTORY_LOG(INFO) << LOG_DESC("GatewayFactory::init ok");
         if (!_entryPoint)
@@ -781,7 +822,7 @@ std::shared_ptr<Gateway> GatewayFactory::buildGateway(GatewayConfig::Ptr _config
     catch (const std::exception& e)
     {
         GATEWAY_FACTORY_LOG(ERROR) << LOG_DESC("GatewayFactory::init")
-                                   << LOG_KV("error", boost::diagnostic_information(e));
+                                   << LOG_KV("message", boost::diagnostic_information(e));
         BOOST_THROW_EXCEPTION(e);
     }
 }
@@ -802,7 +843,7 @@ void GatewayFactory::initFailOver(
             _gateWay->asyncNotifyGroupInfo(groupInfo, [](Error::Ptr&& _error) {
                 if (_error)
                 {
-                    GATEWAY_FACTORY_LOG(INFO) << LOG_DESC("memberChangedNotification error")
+                    GATEWAY_FACTORY_LOG(INFO) << LOG_DESC("memberChangedNotification failed")
                                               << LOG_KV("code", _error->errorCode())
                                               << LOG_KV("msg", _error->errorMessage());
                     return;
@@ -915,7 +956,7 @@ std::shared_ptr<sw::redis::Redis> GatewayFactory::initRedis(
 
         GATEWAY_FACTORY_LOG(ERROR)
             << LOG_BADGE("initRedis") << LOG_DESC("initialize redis exception")
-            << LOG_KV("error", e.what());
+            << LOG_KV("message", e.what());
 
         std::throw_with_nested(e);
     }

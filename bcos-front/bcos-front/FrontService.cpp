@@ -24,6 +24,7 @@
 #include <bcos-front/FrontService.h>
 #include <bcos-utilities/Common.h>
 #include <bcos-utilities/Exceptions.h>
+#include <oneapi/tbb/task_arena.h>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <random>
@@ -34,16 +35,17 @@ using namespace front;
 using namespace protocol;
 
 FrontService::FrontService()
+  : m_localProtocol(g_BCOSConfig.protocolInfo(ProtocolModuleID::NodeService))
 {
-    m_localProtocol = g_BCOSConfig.protocolInfo(ProtocolModuleID::NodeService);
     FRONT_LOG(INFO) << LOG_DESC("FrontService") << LOG_KV("this", this)
                     << LOG_KV("minVersion", m_localProtocol->minVersion())
                     << LOG_KV("maxVersion", m_localProtocol->maxVersion());
 }
 
-FrontService::~FrontService()
+FrontService::~FrontService() noexcept
 {
     stop();
+    m_asyncGroup.wait();
     FRONT_LOG(INFO) << LOG_DESC("~FrontService") << LOG_KV("this", this);
 }
 
@@ -101,9 +103,9 @@ void FrontService::start()
         m_groupID, [self](Error::Ptr _error, bcos::gateway::GroupNodeInfo::Ptr _groupNodeInfo) {
             if (_error)
             {
-                FRONT_LOG(ERROR) << LOG_BADGE("start") << LOG_DESC("asyncGetGroupNodeInfo error")
-                                 << LOG_KV("errorCode", _error->errorCode())
-                                 << LOG_KV("errorMessage", _error->errorMessage());
+                FRONT_LOG(ERROR) << LOG_BADGE("start") << LOG_DESC("asyncGetGroupNodeInfo failed")
+                                 << LOG_KV("code", _error->errorCode())
+                                 << LOG_KV("message", _error->errorMessage());
                 return;
             }
             FRONT_LOG(INFO) << LOG_BADGE("start") << LOG_DESC("asyncGetGroupNodeInfo callback")
@@ -128,7 +130,7 @@ void FrontService::start()
             catch (std::exception& e)
             {
                 FRONT_LOG(WARNING)
-                    << LOG_DESC("IOService") << LOG_KV("error", boost::diagnostic_information(e));
+                    << LOG_DESC("IOService") << LOG_KV("failed", boost::diagnostic_information(e));
             }
 
             if (m_run && m_ioService->stopped())
@@ -180,11 +182,6 @@ void FrontService::stop()
             m_ioService->stop();
         }
 
-        if (m_threadPool)
-        {
-            m_threadPool->stop();
-        }
-
         if (m_frontServiceThread && m_frontServiceThread->joinable())
         {
             m_frontServiceThread->join();
@@ -193,7 +190,7 @@ void FrontService::stop()
     catch (const std::exception& e)
     {
         FRONT_LOG(ERROR) << LOG_DESC("FrontService stop")
-                         << LOG_KV("error", boost::diagnostic_information(e));
+                         << LOG_KV("failed", boost::diagnostic_information(e));
     }
 
     FRONT_LOG(INFO) << LOG_DESC("FrontService stop")
@@ -214,23 +211,18 @@ void FrontService::asyncGetGroupNodeInfo(GetGroupNodeInfoFunc _onGetGroupNodeInf
         groupNodeInfo = m_groupNodeInfo;
     }
 
+    FRONT_LOG(DEBUG) << LOG_DESC("asyncGetGroupNodeInfo")
+                     << LOG_KV("nodeIDs.size()",
+                            (groupNodeInfo ? groupNodeInfo->nodeIDList().size() : 0));
     if (_onGetGroupNodeInfo)
     {
-        if (m_threadPool)
-        {
-            m_threadPool->enqueue([_onGetGroupNodeInfo, groupNodeInfo]() {
+        m_taskArena.execute([&]() {
+            m_asyncGroup.run([_onGetGroupNodeInfo = std::move(_onGetGroupNodeInfo),
+                                 groupNodeInfo = std::move(groupNodeInfo)]() {
                 _onGetGroupNodeInfo(nullptr, groupNodeInfo);
             });
-        }
-        else
-        {
-            _onGetGroupNodeInfo(nullptr, groupNodeInfo);
-        }
+        });
     }
-
-    FRONT_LOG(INFO) << LOG_DESC("asyncGetGroupNodeInfo")
-                    << LOG_KV("nodeIDs.size()",
-                           (groupNodeInfo ? groupNodeInfo->nodeIDList().size() : 0));
 }
 
 /**
@@ -304,7 +296,7 @@ void FrontService::asyncSendMessageByNodeID(int _moduleID, bcos::crypto::NodeIDP
     catch (std::exception& e)
     {
         FRONT_LOG(ERROR) << LOG_BADGE("asyncSendMessageByNodeID")
-                         << LOG_KV("error", boost::diagnostic_information(e));
+                         << LOG_KV("failed", boost::diagnostic_information(e));
     }
 }
 
@@ -344,15 +336,16 @@ void FrontService::asyncSendMessageByNodeIDs(
  */
 void FrontService::asyncSendBroadcastMessage(uint16_t _type, int _moduleID, bytesConstRef _data)
 {
-    auto message = messageFactory()->buildMessage();
-    message->setModuleID(_moduleID);
-    message->setPayload(_data);
+    // auto message = messageFactory()->buildMessage();
+    FrontMessage message;
+    message.setModuleID(_moduleID);
+    message.setPayload(_data);
 
-    auto buffer = std::make_shared<bytes>();
-    message->encode(*buffer);
+    bytes buffer;
+    message.encode(buffer);
 
     m_gatewayInterface->asyncSendBroadcastMessage(
-        _type, m_groupID, _moduleID, m_nodeID, bytesConstRef(buffer->data(), buffer->size()));
+        _type, m_groupID, _moduleID, m_nodeID, bytesConstRef(buffer.data(), buffer.size()));
 }
 
 /**
@@ -375,22 +368,13 @@ void FrontService::onReceiveGroupNodeInfo(const std::string& _groupID,
                     << LOG_KV("nodeIDs.size()",
                            (_groupNodeInfo ? _groupNodeInfo->nodeIDList().size() : 0));
 
-    if (m_threadPool)
-    {
-        auto self = std::weak_ptr<FrontService>(shared_from_this());
-        m_threadPool->enqueue([self, _groupID, _groupNodeInfo]() {
-            auto front = self.lock();
-            if (!front)
-            {
-                return;
-            }
-            front->notifyGroupNodeInfo(_groupID, _groupNodeInfo);
+    auto self = std::weak_ptr<FrontService>(shared_from_this());
+
+    m_taskArena.execute([&]() {
+        m_asyncGroup.run([this, _groupID, _groupNodeInfo = std::move(_groupNodeInfo)]() {
+            notifyGroupNodeInfo(_groupID, _groupNodeInfo);
         });
-    }
-    else
-    {
-        notifyGroupNodeInfo(_groupID, _groupNodeInfo);
-    }
+    });
 
     if (_receiveMsgCallback)
     {
@@ -408,7 +392,7 @@ void FrontService::protocolNegotiate(bcos::gateway::GroupNodeInfo::Ptr _groupNod
         auto mutableProtocol = std::const_pointer_cast<ProtocolInfo>(protocol);
         // negotiate failed: can't happen unless the code has a bug
         if (mutableProtocol->minVersion() > m_localProtocol->maxVersion() ||
-            mutableProtocol->maxVersion() < m_localProtocol->minVersion())
+            mutableProtocol->maxVersion() < m_localProtocol->minVersion()) [[unlikely]]
         {
             FRONT_LOG(ERROR) << LOG_DESC("protocolNegotiate failed")
                              << LOG_KV("nodeID", nodeIDList.at(i))
@@ -424,6 +408,7 @@ void FrontService::protocolNegotiate(bcos::gateway::GroupNodeInfo::Ptr _groupNod
         // set the negotiated version
         auto version = std::min(m_localProtocol->maxVersion(), mutableProtocol->maxVersion());
         mutableProtocol->setVersion((ProtocolVersion)version);
+        m_localProtocolVersion = (ProtocolVersion)version;
         FRONT_LOG(INFO) << LOG_DESC("protocolNegotiate success")
                         << LOG_KV("nodeID", nodeIDList.at(i))
                         << LOG_KV("groupID", _groupNodeInfo->groupID())
@@ -473,8 +458,8 @@ void FrontService::handleCallback(bcos::Error::Ptr _error, bytesConstRef _payLoa
                     {
                         FRONT_LOG(ERROR)
                             << LOG_BADGE("onReceiveMessage sendMessage callback")
-                            << LOG_KV("uuid", _uuid) << LOG_KV("errorCode", _error->errorCode())
-                            << LOG_KV("errorMessage", _error->errorMessage());
+                            << LOG_KV("uuid", _uuid) << LOG_KV("code", _error->errorCode())
+                            << LOG_KV("message", _error->errorMessage());
                     }
                 });
         }
@@ -485,20 +470,17 @@ void FrontService::handleCallback(bcos::Error::Ptr _error, bytesConstRef _payLoa
         callback->timeoutHandler->cancel();
     }
 
-    if (m_threadPool)
-    {
-        // construct shared_ptr<bytes> from message->payload() first for
-        // thead safe
-        std::shared_ptr<bytes> buffer = std::make_shared<bytes>(_payLoad.begin(), _payLoad.end());
-        m_threadPool->enqueue([_uuid, _error, callback, buffer, _nodeID, respFunc] {
+    // construct shared_ptr<bytes> from message->payload() first for
+    // thead safe
+    auto buffer = bytes(_payLoad.begin(), _payLoad.end());
+    m_taskArena.execute([&]() {
+        m_asyncGroup.run([_uuid, _error = std::move(_error), callback = std::move(callback),
+                             buffer = std::move(buffer), _nodeID = std::move(_nodeID),
+                             respFunc = std::move(respFunc)] {
             callback->callbackFunc(
-                _error, _nodeID, bytesConstRef(buffer->data(), buffer->size()), _uuid, respFunc);
+                _error, _nodeID, bytesConstRef(buffer.data(), buffer.size()), _uuid, respFunc);
         });
-    }
-    else
-    {
-        callback->callbackFunc(_error, _nodeID, _payLoad, _uuid, respFunc);
-    }
+    });
 }
 /**
  * @brief: receive message from gateway
@@ -508,8 +490,8 @@ void FrontService::handleCallback(bcos::Error::Ptr _error, bytesConstRef _payLoa
  * @param _receiveMsgCallback: response callback
  * @return void
  */
-void FrontService::onReceiveMessage(const std::string& _groupID, const bcos::crypto::NodeIDPtr& _nodeID,
-    bytesConstRef _data, ReceiveMsgFunc _receiveMsgCallback)
+void FrontService::onReceiveMessage(const std::string& _groupID,
+    const bcos::crypto::NodeIDPtr& _nodeID, bytesConstRef _data, ReceiveMsgFunc _receiveMsgCallback)
 {
     try
     {
@@ -540,21 +522,18 @@ void FrontService::onReceiveMessage(const std::string& _groupID, const bcos::cry
             auto it = m_moduleID2MessageDispatcher.find(moduleID);
             if (it != m_moduleID2MessageDispatcher.end())
             {
-                if (m_threadPool)
-                {
-                    auto callback = it->second;
-                    // construct shared_ptr<bytes> from message->payload() first for
-                    // thead safe
-                    std::shared_ptr<bytes> buffer = std::make_shared<bytes>(
-                        message->payload().begin(), message->payload().end());
-                    m_threadPool->enqueue([uuid, callback, buffer, message, _nodeID] {
-                        callback(_nodeID, uuid, bytesConstRef(buffer->data(), buffer->size()));
-                    });
-                }
-                else
-                {
-                    it->second(_nodeID, uuid, message->payload());
-                }
+                auto callback = it->second;
+                // construct shared_ptr<bytes> from message->payload() first for
+                // thead safe
+                bytes buffer(message->payload().begin(), message->payload().end());
+
+                m_taskArena.execute([&]() mutable {
+                    m_asyncGroup.run(
+                        [uuid, callback = std::move(callback), buffer = std::move(buffer),
+                            message = std::move(message), _nodeID] {
+                            callback(_nodeID, uuid, bytesConstRef(buffer.data(), buffer.size()));
+                        });
+                });
             }
             else
             {
@@ -565,19 +544,17 @@ void FrontService::onReceiveMessage(const std::string& _groupID, const bcos::cry
     }
     catch (const std::exception& e)
     {
-        FRONT_LOG(ERROR) << "onReceiveMessage" << LOG_KV("error", boost::diagnostic_information(e));
+        FRONT_LOG(ERROR) << "onReceiveMessage"
+                         << LOG_KV("failed", boost::diagnostic_information(e));
     }
 
     if (_receiveMsgCallback)
     {
-        if (m_threadPool)
-        {
-            m_threadPool->enqueue([_receiveMsgCallback]() { _receiveMsgCallback(nullptr); });
-        }
-        else
-        {
-            _receiveMsgCallback(nullptr);
-        }
+        m_taskArena.execute([&]() mutable {
+            m_asyncGroup.run([_receiveMsgCallback = std::move(_receiveMsgCallback)]() {
+                _receiveMsgCallback(nullptr);
+            });
+        });
     }
 }
 
@@ -651,18 +628,13 @@ void FrontService::onMessageTimeout(const boost::system::error_code& _error,
         if (callback)
         {
             auto errorPtr = BCOS_ERROR_PTR(CommonError::TIMEOUT, "timeout");
-            if (m_threadPool)
-            {
-                m_threadPool->enqueue([_uuid, _nodeID, callback, errorPtr]() {
-                    callback->callbackFunc(errorPtr, _nodeID, bytesConstRef(), _uuid,
-                        std::function<void(bytesConstRef)>());
-                });
-            }
-            else
-            {
-                callback->callbackFunc(errorPtr, _nodeID, bytesConstRef(), _uuid,
-                    std::function<void(bytesConstRef)>());
-            }
+            m_taskArena.execute([&]() {
+                m_asyncGroup.run(
+                    [_uuid, _nodeID = std::move(_nodeID), callback = std::move(callback),
+                        errorPtr = std::move(errorPtr)]() {
+                        callback->callbackFunc(errorPtr, _nodeID, {}, _uuid, {});
+                    });
+            });
         }
 
         FRONT_LOG(WARNING) << LOG_BADGE("onMessageTimeout") << LOG_KV("uuid", _uuid);
@@ -670,6 +642,6 @@ void FrontService::onMessageTimeout(const boost::system::error_code& _error,
     catch (std::exception& e)
     {
         FRONT_LOG(ERROR) << "onMessageTimeout" << LOG_KV("uuid", _uuid)
-                         << LOG_KV("error", boost::diagnostic_information(e));
+                         << LOG_KV("failed", boost::diagnostic_information(e));
     }
 }

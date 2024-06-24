@@ -22,16 +22,19 @@
 #include "bcos-gateway/libnetwork/Session.h"
 #include "bcos-gateway/libnetwork/Socket.h"
 #include "bcos-gateway/libp2p/P2PMessageV2.h"
-#include "bcos-gateway/libratelimit/DistributedRateLimiter.h"
+#include "bcos-utilities/ratelimiter/DistributedRateLimiter.h"
 #include <bcos-crypto/signature/key/KeyFactoryImpl.h>
 #include <bcos-framework/protocol/GlobalConfig.h>
 #include <bcos-gateway/GatewayFactory.h>
 #include <bcos-gateway/libamop/AirTopicManager.h>
 #include <bcos-rpc/RpcFactory.h>
 #include <bcos-rpc/groupmgr/NodeService.h>
+#include <bcos-rpc/tarsRPC/RPCServer.h>
 #include <bcos-scheduler/src/SchedulerImpl.h>
 #include <bcos-tars-protocol/protocol/ProtocolInfoCodecImpl.h>
 #include <bcos-tool/NodeConfig.h>
+#include <rocksdb/env.h>
+#include <iterator>
 
 using namespace bcos::node;
 using namespace bcos::initializer;
@@ -43,8 +46,8 @@ void AirNodeInitializer::init(std::string const& _configFilePath, std::string co
 {
     g_BCOSConfig.setCodec(std::make_shared<bcostars::protocol::ProtocolInfoCodecImpl>());
 
-    boost::property_tree::ptree pt;
-    boost::property_tree::read_ini(_configFilePath, pt);
+    boost::property_tree::ptree ptree;
+    boost::property_tree::read_ini(_configFilePath, ptree);
 
     m_logInitializer = std::make_shared<BoostLogInitializer>();
     m_logInitializer->initLog(_configFilePath);
@@ -84,15 +87,27 @@ void AirNodeInitializer::init(std::string const& _configFilePath, std::string co
         m_nodeInitializer->protocolInitializer()->dataEncryption());
     rpcFactory.setNodeConfig(nodeConfig);
     m_rpc = rpcFactory.buildLocalRpc(groupInfo, nodeService);
-    auto topicManager =
-        std::dynamic_pointer_cast<bcos::amop::LocalTopicManager>(gateway->amop()->topicManager());
-    topicManager->setLocalClient(m_rpc);
+    if (gateway->amop())
+    {
+        auto topicManager = std::dynamic_pointer_cast<bcos::amop::LocalTopicManager>(
+            gateway->amop()->topicManager());
+        topicManager->setLocalClient(m_rpc);
+    }
     m_nodeInitializer->initNotificationHandlers(m_rpc);
 
     m_objMonitor = std::make_shared<bcos::ObjectAllocatorMonitor>();
 
     // NOTE: this should be last called
     m_nodeInitializer->initSysContract();
+
+    // tars rpc
+    if (!nodeConfig->tarsRPCConfig().host.empty() && nodeConfig->tarsRPCConfig().port > 0 &&
+        nodeConfig->tarsRPCConfig().threadCount > 0)
+    {
+        m_tarsApplication.emplace(nodeService);
+        m_tarsConfig.emplace(RPCApplication::generateTarsConfig(nodeConfig->tarsRPCConfig().host,
+            nodeConfig->tarsRPCConfig().port, nodeConfig->tarsRPCConfig().threadCount));
+    }
 }
 
 void AirNodeInitializer::start()
@@ -125,8 +140,21 @@ void AirNodeInitializer::start()
             bcos::gateway::P2PMessage, bcos::gateway::P2PSession, bcos::gateway::P2PMessageV2,
             bcos::gateway::FrontServiceInfo, bcos::gateway::GatewayNodeStatus,
             bcos::gateway::GatewayStatus, bcos::gateway::ResponseCallback, bcos::gateway::Retry,
-            bcos::gateway::ratelimiter::TimeWindowRateLimiter,
-            bcos::gateway::ratelimiter::DistributedRateLimiter /*gateway end*/>(4);
+            bcos::ratelimiter::TimeWindowRateLimiter,
+            bcos::ratelimiter::DistributedRateLimiter /*gateway end*/>(4);
+    }
+
+    if (m_tarsApplication && m_tarsConfig)
+    {
+        boost::atomic_bool started = false;
+        m_tarsThread.emplace([&, this]() {
+            m_tarsApplication->main(*m_tarsConfig);
+            started = true;
+            started.notify_all();
+            m_tarsApplication->waitForShutdown();
+        });
+
+        started.wait(false);
     }
 }
 
@@ -145,6 +173,11 @@ void AirNodeInitializer::stop()
         if (m_nodeInitializer)
         {
             m_nodeInitializer->stop();
+        }
+        if (m_tarsApplication && m_tarsThread)
+        {
+            m_tarsApplication->terminate();
+            m_tarsThread->join();
         }
 
         if (m_objMonitor)

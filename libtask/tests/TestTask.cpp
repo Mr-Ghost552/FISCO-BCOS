@@ -1,17 +1,28 @@
-#include "bcos-utilities/Overloaded.h"
-#include <bcos-task/TBBScheduler.h>
-#include <bcos-task/Task.h>
-#include <bcos-task/Wait.h>
-#include <tbb/task_group.h>
+#include "bcos-task/Generator.h"
+#include "bcos-task/TBBWait.h"
+#include "bcos-task/Task.h"
+#include "bcos-task/Wait.h"
+#include <oneapi/tbb/blocked_range.h>
+#include <oneapi/tbb/concurrent_vector.h>
+#include <oneapi/tbb/parallel_for.h>
+#include <oneapi/tbb/parallel_for_each.h>
+#include <oneapi/tbb/task.h>
+#include <oneapi/tbb/task_arena.h>
+#include <oneapi/tbb/task_group.h>
+#include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
+#include <boost/throw_exception.hpp>
 #include <chrono>
+#include <future>
+#include <iostream>
+#include <stdexcept>
 #include <thread>
 
 using namespace bcos::task;
 
 struct TaskFixture
 {
-    tbb::task_group taskGroup;
+    oneapi::tbb::task_group taskGroup;
 };
 
 BOOST_FIXTURE_TEST_SUITE(TaskTest, TaskFixture)
@@ -51,6 +62,20 @@ Task<void> level1()
     co_return;
 }
 
+void innerThrow()
+{
+    BOOST_THROW_EXCEPTION(std::runtime_error("error11"));
+}
+
+BOOST_AUTO_TEST_CASE(taskException)
+{
+    BOOST_CHECK_THROW(bcos::task::wait([]() -> bcos::task::Task<void> {
+        innerThrow();
+        co_return;
+    }()),
+        std::runtime_error);
+}
+
 BOOST_AUTO_TEST_CASE(normalTask)
 {
     bool finished = false;
@@ -68,7 +93,7 @@ BOOST_AUTO_TEST_CASE(normalTask)
     BOOST_CHECK_EQUAL(num, 10000);
 }
 
-Task<int> asyncLevel2(tbb::task_group& taskGroup)
+Task<int> asyncLevel2(oneapi::tbb::task_group& taskGroup)
 {
     struct Awaitable
     {
@@ -77,7 +102,7 @@ Task<int> asyncLevel2(tbb::task_group& taskGroup)
         void await_suspend(CO_STD::coroutine_handle<> handle)
         {
             std::cout << "Start run async thread: " << handle.address() << std::endl;
-            taskGroup.run([this, m_handle = std::move(handle)]() {
+            taskGroup.run([this, m_handle = handle]() {
                 std::this_thread::sleep_for(std::chrono::seconds(2));
                 num = 100;
 
@@ -93,12 +118,13 @@ Task<int> asyncLevel2(tbb::task_group& taskGroup)
             return num;
         }
 
-        tbb::task_group& taskGroup;
+        oneapi::tbb::task_group& taskGroup;
         int num = 0;
     };
 
     std::cout << "co_await Awaitable started" << std::endl;
-    auto num = co_await Awaitable{taskGroup, 0};
+    Awaitable awaitable{taskGroup, 0};
+    auto num = co_await awaitable;
     std::cout << "co_await Awaitable ended" << std::endl;
 
     BOOST_CHECK_EQUAL(num, 100);
@@ -107,7 +133,7 @@ Task<int> asyncLevel2(tbb::task_group& taskGroup)
     co_return num;
 }
 
-Task<int> asyncLevel1(tbb::task_group& taskGroup)
+Task<int> asyncLevel1(oneapi::tbb::task_group& taskGroup)
 {
     std::cout << "co_await asyncLevel2 started" << std::endl;
     auto num1 = co_await asyncLevel2(taskGroup);
@@ -129,6 +155,7 @@ BOOST_AUTO_TEST_CASE(asyncTask)
 
         BOOST_CHECK_EQUAL(result, 200);
         std::cout << "Got async result" << std::endl;
+        co_return;
     }(taskGroup));
 
     std::cout << "Top task destroyed" << std::endl;
@@ -137,17 +164,91 @@ BOOST_AUTO_TEST_CASE(asyncTask)
     std::cout << "asyncTask test over" << std::endl;
 }
 
-BOOST_AUTO_TEST_CASE(tbbScheduler)
+struct SleepTask
 {
-    TBBScheduler tbbScheduler;
+    inline static oneapi::tbb::concurrent_vector<std::future<void>> futures;
 
-    bcos::task::syncWait(
-        []() -> Task<void> {
-            auto num = co_await level2();
-            co_await level3();
-            co_return;
-        }(),
-        &tbbScheduler);
+    constexpr static bool await_ready() { return false; }
+    void await_suspend(CO_STD::coroutine_handle<> handle)
+    {
+        futures.emplace_back(std::async([m_handle = handle]() mutable {
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(1s);
+            m_handle.resume();
+        }));
+    }
+    constexpr void await_resume() const {}
+};
+
+bcos::task::Generator<int> genInt()
+{
+    co_yield 1;
+    co_yield 2;
+    co_yield 3;
+}
+
+BOOST_AUTO_TEST_CASE(generator)
+{
+    int j = 0;
+    for (auto i : genInt())
+    {
+        BOOST_CHECK_EQUAL(i, ++j);
+        std::cout << i << std::endl;
+    }
+    std::cout << "All outputed" << std::endl;
+}
+
+struct ResumableTask
+{
+    ResumableTask() = default;
+    ResumableTask(const ResumableTask&) = delete;
+    ResumableTask& operator=(const ResumableTask&) = delete;
+    ResumableTask(ResumableTask&&) = default;
+    ResumableTask& operator=(ResumableTask&&) = default;
+    ~ResumableTask() noexcept = default;
+
+    CO_STD::coroutine_handle<> m_handle;
+
+    constexpr bool static await_ready() { return false; }
+    void await_suspend(CO_STD::coroutine_handle<> handle)
+    {
+        std::cout << "Task suspend!" << std::endl;
+        m_handle = handle;
+    }
+    constexpr void await_resume() const {}
+};
+
+BOOST_AUTO_TEST_CASE(tbbWait)
+{
+    constexpr static auto count = 20;
+    std::vector<ResumableTask> tasks(count);
+
+    ::tbb::task_arena arena(2);
+    ::tbb::task_group group1;
+    arena.execute([&]() {
+        for (auto i = 0; i < count; ++i)
+        {
+            group1.run([&tasks, i]() {
+                std::cout << "Task " << i << " started" << std::endl;
+                bcos::task::tbb::syncWait(tasks[i]);
+                std::cout << "Task " << i << " ended" << std::endl;
+            });
+        }
+
+        group1.run([&]() {
+            using namespace std::chrono_literals;
+            std::this_thread::sleep_for(1s);
+
+            for (auto& task : tasks)
+            {
+                BOOST_REQUIRE(task.m_handle);
+                task.m_handle.resume();
+            }
+        });
+    });
+
+
+    group1.wait();
 }
 
 BOOST_AUTO_TEST_SUITE_END()

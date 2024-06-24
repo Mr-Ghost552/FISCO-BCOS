@@ -114,6 +114,11 @@ struct ABIStringType<std::string> : std::true_type
 {
 };
 
+template <>
+struct ABIStringType<std::string_view> : std::true_type
+{
+};
+
 // check if type of static array
 template <class T>
 struct ABIStaticArray : std::false_type
@@ -141,6 +146,11 @@ struct ABIDynamicArray : std::false_type
 // a fixed-length array of N elements of type T.
 template <class T>
 struct ABIDynamicArray<std::vector<T>> : std::true_type
+{
+};
+
+template <>
+struct ABIDynamicArray<bytesConstRef> : std::true_type
 {
 };
 
@@ -275,7 +285,8 @@ struct Offset<T>
 class ContractABICodec
 {
 public:
-    explicit ContractABICodec(bcos::crypto::Hash::Ptr _hashImpl) : m_hashImpl(_hashImpl) {}
+    explicit ContractABICodec(const bcos::crypto::Hash& hashImpl) : m_hashImpl(hashImpl) {}
+    // explicit ContractABICodec(bcos::crypto::Hash::Ptr _hashImpl) : m_hashImpl(_hashImpl) {}
 
     template <class T, std::enable_if_t<!std::is_integral<T>::value>>
     bytes serialise(const T& _t)
@@ -286,14 +297,14 @@ public:
     }
 
     template <class T>
-    requires std::signed_integral<T> &&(!std::same_as<T, char>)
+        requires std::signed_integral<T> && (!std::same_as<T, char>)
     bytes serialise(const T& _in)
     {
         return serialise(s256(_in));
     }
 
     template <class T>
-    requires std::unsigned_integral<T> &&(!std::same_as<T, bool>)
+        requires std::unsigned_integral<T> && (!std::same_as<T, bool>)
     bytes serialise(const T& _in)
     {
         return serialise(u256(_in));
@@ -303,24 +314,26 @@ public:
     bytes serialise(const u256& _in);
 
     // two’s complement signed integer type int256.
-    bytes serialise(const s256& _in);
+    static bytes serialise(const s256& _in);
 
     // equivalent to uint8 restricted to the values 0 and 1. For computing the function selector,
     // bool is used
-    bytes serialise(const bool& _in);
+    static bytes serialise(const bool& _in);
 
     // equivalent to uint160, except for the assumed interpretation and language typing. For
     // computing the function selector, address is used.
     // bool is used.
-    bytes serialise(const Address& _in);
+    static bytes serialise(const Address& _in);
 
     // binary type of 32 bytes
-    bytes serialise(const string32& _in);
+    static bytes serialise(const string32& _in);
 
-    bytes serialise(const bytes& _in);
+    static bytes serialise(bytesConstRef input);
+    static bytes serialise(const bytes& _in);
 
     // dynamic sized unicode string assumed to be UTF-8 encoded.
     bytes serialise(const std::string& _in);
+    bytes serialise(std::string_view _in);
 
     // static array
     template <class T, std::size_t N>
@@ -348,7 +361,7 @@ public:
     void deserialize(bool& _out, std::size_t _offset);
 
     template <class T>
-    requires std::signed_integral<T> && (!std::same_as<T, char>)
+        requires std::signed_integral<T> && (!std::same_as<T, char>)
     void deserialize(T& _out, std::size_t _offset)
     {
         s256 out;
@@ -357,7 +370,7 @@ public:
     }
 
     template <class T>
-    requires std::unsigned_integral<T> && (!std::same_as<T, bool>)
+        requires std::unsigned_integral<T> && (!std::same_as<T, bool>)
     void deserialize(T& _out, std::size_t _offset)
     {
         u256 out;
@@ -383,7 +396,7 @@ public:
     void deserialize(std::tuple<T...>& out, std::size_t _offset);
 
 private:
-    bcos::crypto::Hash::Ptr m_hashImpl;
+    const bcos::crypto::Hash& m_hashImpl;
     static const int MAX_BYTE_LENGTH = 32;
     // encode or decode offset
     std::size_t offset{0};
@@ -509,7 +522,7 @@ public:
 
         return _sig.empty() ?
                    fixed + dynamic :
-                   m_hashImpl->hash(_sig).ref().getCroppedData(0, 4).toBytes() + fixed + dynamic;
+                   m_hashImpl.hash(_sig).ref().getCroppedData(0, 4).toBytes() + fixed + dynamic;
     }
 
     template <class... T>

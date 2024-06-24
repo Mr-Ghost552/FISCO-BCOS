@@ -21,10 +21,10 @@
 
 #pragma once
 #include "VMInstance.h"
+#include "bcos-utilities/Error.h"
 #include <evmone/evmone.h>
+#include <boost/throw_exception.hpp>
 #include <memory>
-#include <string>
-#include <vector>
 
 namespace bcos::transaction_executor
 {
@@ -33,19 +33,25 @@ enum class VMKind
     evmone,
 };
 
+// clang-format off
+struct UnknownVMError : public bcos::Error {};
+// clang-format on
+
 class VMFactory
 {
 public:
-    /// Creates a VM instance of the global kind.
-    static VMInstance create() { return create(VMKind::evmone); }
-
-    /// Creates a VM instance of the kind provided.
-    static VMInstance create(VMKind kind)
+    static VMInstance create(VMKind kind, bytesConstRef code, evmc_revision mode)
     {
         switch (kind)
         {
         case VMKind::evmone:
-            return VMInstance{evmc_create_evmone()};
+        {
+            return VMInstance{
+                std::make_shared<evmone::baseline::CodeAnalysis>(evmone::baseline::analyze(
+                    mode, evmone::bytes_view((const uint8_t*)code.data(), code.size())))};
+        }
+        default:
+            BOOST_THROW_EXCEPTION(UnknownVMError{});
         }
     }
 };

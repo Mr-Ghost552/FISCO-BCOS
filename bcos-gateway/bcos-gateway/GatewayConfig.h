@@ -14,16 +14,13 @@
 #include <boost/property_tree/ptree.hpp>
 #include <array>
 
-namespace bcos
-{
-namespace gateway
+namespace bcos::gateway
 {
 class GatewayConfig : public bcos::ObjectCounter<GatewayConfig>
 {
 public:
     using Ptr = std::shared_ptr<GatewayConfig>;
 
-public:
     // cert for ssl connection
     struct CertConfig
     {
@@ -64,6 +61,7 @@ public:
     // config for rate limit
     struct RateLimiterConfig
     {
+        bool enable = false;
         // time window for rate limiter
         int32_t timeWindowSec = 1;
         // allow outgoing msg exceed max permit size
@@ -174,10 +172,12 @@ public:
     void setCertPath(std::string const& _certPath) { m_certPath = _certPath; }
     void setNodePath(std::string const& _nodePath) { m_nodePath = _nodePath; }
     void setNodeFileName(const std::string& _nodeFileName) { m_nodeFileName = _nodeFileName; }
+    void setConfigFile(const std::string& _configFile) { m_configFile = _configFile; }
 
     std::string const& certPath() const { return m_certPath; }
     std::string const& nodePath() const { return m_nodePath; }
     std::string const& nodeFileName() const { return m_nodeFileName; }
+    std::string const& configFile() const { return m_configFile; }
 
     // check if the port valid
     bool isValidPort(int port);
@@ -185,6 +185,8 @@ public:
     bool isValidIP(const std::string& _ip);
     // MB to bit
     int64_t doubleMBToBit(double _d);
+    bool isIPAddress(const std::string& _input);
+    bool isHostname(const std::string& _input);
     void hostAndPort2Endpoint(const std::string& _host, NodeIPEndpoint& _endpoint);
     void parseConnectedJson(const std::string& _json, std::set<NodeIPEndpoint>& _nodeIPEndpointSet);
     // loads p2p configuration items from the configuration file
@@ -218,14 +220,34 @@ public:
 
     const std::set<NodeIPEndpoint>& connectedNodes() const { return m_connectedNodes; }
 
-    bool enableBlacklist() const { return m_enableBlacklist; }
-    const std::set<std::string>& peerBlacklist() const { return m_certBlacklist; }
-    bool enableWhitelist() const { return m_enableWhitelist; }
-    const std::set<std::string>& peerWhitelist() const { return m_certWhitelist; }
+    bool enableBlacklist() const
+    {
+        bcos::Guard l(x_certBlacklist);
+        return m_enableBlacklist;
+    }
+    const std::set<std::string>& peerBlacklist() const
+    {
+        bcos::Guard l(x_certBlacklist);
+        return m_certBlacklist;
+    }
+    bool enableWhitelist() const
+    {
+        bcos::Guard l(x_certWhitelist);
+        return m_enableWhitelist;
+    }
+    const std::set<std::string>& peerWhitelist() const
+    {
+        bcos::Guard l(x_certWhitelist);
+        return m_certWhitelist;
+    }
+
+    void loadPeerBlacklist();
+    void loadPeerWhitelist();
 
     std::string const& uuid() const { return m_uuid; }
     void setUUID(std::string const& _uuid) { m_uuid = _uuid; }
 
+    bool readonly() const { return m_readonly; }
     void setEnableRIPProtocol(bool _enableRIPProtocol) { m_enableRIPProtocol = _enableRIPProtocol; }
     bool enableRIPProtocol() const { return m_enableRIPProtocol; }
 
@@ -277,7 +299,6 @@ public:
         {
             return false;
         }
-        return false;
     }
 
 private:
@@ -301,9 +322,11 @@ private:
     // p2p connected nodes host list
     std::set<NodeIPEndpoint> m_connectedNodes;
     // peer black list
+    mutable bcos::Mutex x_certBlacklist;
     bool m_enableBlacklist{false};
     std::set<std::string> m_certBlacklist;
     // peer white list
+    mutable bcos::Mutex x_certWhitelist;
     bool m_enableWhitelist{false};
     // enable rip protocol
     bool m_enableRIPProtocol{true};
@@ -320,7 +343,9 @@ private:
     std::string m_certPath;
     std::string m_nodePath;
     std::string m_nodeFileName;
+    std::string m_configFile;
+
+    bool m_readonly = false;
 };
 
-}  // namespace gateway
 }  // namespace bcos

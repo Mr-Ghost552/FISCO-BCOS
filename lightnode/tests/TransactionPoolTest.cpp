@@ -1,7 +1,6 @@
 #include "bcos-task/Wait.h"
-#include <bcos-tars-protocol/impl/TarsSerializable.h>
-
 #include <bcos-lightnode/transaction-pool/TransactionPoolImpl.h>
+#include <bcos-tars-protocol/impl/TarsSerializable.h>
 #include <bcos-tars-protocol/protocol/TransactionSubmitResultImpl.h>
 #include <bcos-tars-protocol/tars/Transaction.h>
 #include <bcos-tars-protocol/tars/TransactionReceipt.h>
@@ -9,9 +8,7 @@
 #include <boost/exception/diagnostic_information.hpp>
 #include <boost/test/unit_test.hpp>
 #include <boost/throw_exception.hpp>
-#include <exception>
 #include <thread>
-#include <variant>
 
 template <bool withError>
 class MockTransactionPoolMT
@@ -27,8 +24,7 @@ public:
         }
         else
         {
-            auto result =
-                std::make_shared<bcostars::protocol::TransactionSubmitResultImpl>(nullptr);
+            auto result = std::make_shared<bcostars::protocol::TransactionSubmitResultImpl>();
             bcostars::TransactionReceipt receipt;
             receipt.data.status = 100;
             receipt.data.blockNumber = 10086;
@@ -48,7 +44,7 @@ public:
     {
         std::cout << "start resume at " << std::this_thread::get_id() << std::endl;
 
-        auto result = std::make_shared<bcostars::protocol::TransactionSubmitResultImpl>(nullptr);
+        auto result = std::make_shared<bcostars::protocol::TransactionSubmitResultImpl>();
         bcostars::TransactionReceipt receipt;
         receipt.data.status = 79;
         auto receiptObj = std::make_shared<bcostars::protocol::TransactionReceiptImpl>(

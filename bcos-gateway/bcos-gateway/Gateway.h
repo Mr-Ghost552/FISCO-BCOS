@@ -22,10 +22,12 @@
 
 #include "bcos-gateway/libratelimit/GatewayRateLimiter.h"
 #include "bcos-utilities/ObjectAllocatorMonitor.h"
+#include "filter/ReadOnlyFilter.h"
 #include <bcos-framework/front/FrontServiceInterface.h>
 #include <bcos-framework/gateway/GatewayInterface.h>
 #include <bcos-framework/protocol/CommonError.h>
 #include <bcos-gateway/Common.h>
+#include <bcos-gateway/GatewayConfig.h>
 #include <bcos-gateway/gateway/GatewayNodeManager.h>
 #include <bcos-gateway/libamop/AMOPImpl.h>
 #include <bcos-gateway/libp2p/Service.h>
@@ -40,10 +42,21 @@ namespace gateway
 class Retry : public std::enable_shared_from_this<Retry>, public ObjectCounter<Retry>
 {
 public:
+    Retry(crypto::NodeIDPtr _srcNodeID, crypto::NodeIDPtr _dstNodeID,
+        std::shared_ptr<P2PMessage> _p2pMessage, std::shared_ptr<P2PInterface> _p2pInterface,
+        ErrorRespFunc _respFunc, int _moduleID)
+      : m_srcNodeID(std::move(_srcNodeID)),
+        m_dstNodeID(std::move(_dstNodeID)),
+        m_p2pMessage(std::move(_p2pMessage)),
+        m_p2pInterface(std::move(_p2pInterface)),
+        m_respFunc(std::move(_respFunc)),
+        m_moduleID(_moduleID)
+    {}
     // random choose one p2pID to send message
     P2pID chooseP2pID()
     {
         auto p2pId = P2pID();
+        std::lock_guard<std::mutex> lock(x_mutex);
         if (!m_p2pIDs.empty())
         {
             p2pId = *m_p2pIDs.begin();
@@ -112,8 +125,8 @@ public:
 
                 GATEWAY_LOG(DEBUG)
                     << LOG_BADGE("Retry") << LOG_DESC("network callback") << LOG_KV("seq", seq)
-                    << LOG_KV("dstP2P", p2pID) << LOG_KV("errorCode", e.errorCode())
-                    << LOG_KV("moduleID", moduleID) << LOG_KV("errorMessage", e.what())
+                    << LOG_KV("dstP2P", p2pID) << LOG_KV("code", e.errorCode())
+                    << LOG_KV("moduleID", moduleID) << LOG_KV("message", e.what())
                     << LOG_KV("timeCost", (utcTime() - startT));
                 // try again
                 self->trySendMessage();
@@ -129,10 +142,9 @@ public:
                 // message successfully,find another gateway and try again
                 if (respCode != bcos::protocol::CommonError::SUCCESS)
                 {
-                    GATEWAY_LOG(DEBUG)
-                        << LOG_BADGE("Retry") << LOG_KV("p2pid", p2pID)
-                        << LOG_KV("moduleID", moduleID) << LOG_KV("errorCode", respCode)
-                        << LOG_KV("errorMessage", e.what());
+                    GATEWAY_LOG(DEBUG) << LOG_BADGE("Retry") << LOG_KV("p2pid", p2pID)
+                                       << LOG_KV("moduleID", moduleID) << LOG_KV("code", respCode)
+                                       << LOG_KV("message", e.what());
                     // try again
                     self->trySendMessage();
                     return;
@@ -158,8 +170,8 @@ public:
                                    << LOG_KV("src", message->options() ?
                                                         toHex(*(message->options()->srcNodeID())) :
                                                         "unknown")
-                                   << LOG_KV("size", message->length()) << LOG_KV("error", e.what())
-                                   << LOG_KV("moduleID", moduleID);
+                                   << LOG_KV("size", message->length())
+                                   << LOG_KV("message", e.what()) << LOG_KV("moduleID", moduleID);
 
                 self->trySendMessage();
             }
@@ -167,7 +179,16 @@ public:
         m_p2pInterface->asyncSendMessageByNodeID(p2pID, m_p2pMessage, callback, Options(10000));
     }
 
-public:
+    // insert p2pIDs
+    void insertP2pIDs(RANGES::range auto const& _p2pIDs)
+    {
+        std::lock_guard<std::mutex> lock(x_mutex);
+        m_p2pIDs.insert(m_p2pIDs.end(), _p2pIDs.begin(), _p2pIDs.end());
+    }
+
+private:
+    // mutex for p2pIDs
+    mutable std::mutex x_mutex;
     std::vector<P2pID> m_p2pIDs;
     crypto::NodeIDPtr m_srcNodeID;
     crypto::NodeIDPtr m_dstNodeID;
@@ -181,12 +202,12 @@ class Gateway : public GatewayInterface, public std::enable_shared_from_this<Gat
 {
 public:
     using Ptr = std::shared_ptr<Gateway>;
-    Gateway(std::string const& _chainID, P2PInterface::Ptr _p2pInterface,
+    Gateway(GatewayConfig::Ptr _gatewayConfig, P2PInterface::Ptr _p2pInterface,
         GatewayNodeManager::Ptr _gatewayNodeManager, bcos::amop::AMOPImpl::Ptr _amop,
         ratelimiter::GatewayRateLimiter::Ptr _gatewayRateLimiter,
         std::string _gatewayServiceName = "localGateway")
       : m_gatewayServiceName(_gatewayServiceName),
-        m_chainID(_chainID),
+        m_gatewayConfig(_gatewayConfig),
         m_p2pInterface(_p2pInterface),
         m_gatewayNodeManager(_gatewayNodeManager),
         m_amop(_amop),
@@ -270,7 +291,6 @@ public:
         bcos::crypto::NodeIDPtr _srcNodeID, bcos::crypto::NodeIDPtr _dstNodeID,
         bytesConstRef _payload, ErrorRespFunc _errorRespFunc = ErrorRespFunc());
 
-
     P2PInterface::Ptr p2pInterface() const { return m_p2pInterface; }
     GatewayNodeManager::Ptr gatewayNodeManager() { return m_gatewayNodeManager; }
     /**
@@ -285,24 +305,42 @@ public:
     void asyncSendMessageByTopic(const std::string& _topic, bcos::bytesConstRef _data,
         std::function<void(bcos::Error::Ptr&&, int16_t, bytesPointer)> _respFunc) override
     {
-        m_amop->asyncSendMessageByTopic(_topic, _data, _respFunc);
+        if (m_amop)
+        {
+            m_amop->asyncSendMessageByTopic(_topic, _data, std::move(_respFunc));
+            return;
+        }
+        _respFunc(BCOS_ERROR_PTR(-1, "AMOP is not initialized"), 0, nullptr);
     }
     void asyncSendBroadcastMessageByTopic(
         const std::string& _topic, bcos::bytesConstRef _data) override
     {
-        m_amop->asyncSendBroadcastMessageByTopic(_topic, _data);
+        if (m_amop)
+        {
+            m_amop->asyncSendBroadcastMessageByTopic(_topic, _data);
+        }
     }
 
     void asyncSubscribeTopic(std::string const& _clientID, std::string const& _topicInfo,
         std::function<void(Error::Ptr&&)> _callback) override
     {
-        m_amop->asyncSubscribeTopic(_clientID, _topicInfo, _callback);
+        if (m_amop)
+        {
+            m_amop->asyncSubscribeTopic(_clientID, _topicInfo, std::move(_callback));
+            return;
+        }
+        _callback(BCOS_ERROR_PTR(-1, "AMOP is not initialized"));
     }
 
     void asyncRemoveTopic(std::string const& _clientID, std::vector<std::string> const& _topicList,
         std::function<void(Error::Ptr&&)> _callback) override
     {
-        m_amop->asyncRemoveTopic(_clientID, _topicList, _callback);
+        if (m_amop)
+        {
+            m_amop->asyncRemoveTopic(_clientID, _topicList, std::move(_callback));
+            return;
+        }
+        _callback(BCOS_ERROR_PTR(-1, "AMOP is not initialized"));
     }
 
     bcos::amop::AMOPImpl::Ptr amop() { return m_amop; }
@@ -319,6 +357,8 @@ public:
     {
         return m_gatewayNodeManager->unregisterNode(_groupID, _nodeID);
     }
+
+    void enableReadOnlyMode();
 
 protected:
     // for UT
@@ -341,7 +381,7 @@ protected:
 
 private:
     std::string m_gatewayServiceName;
-    std::string m_chainID;
+    GatewayConfig::Ptr m_gatewayConfig;
     // p2p service interface
     P2PInterface::Ptr m_p2pInterface;
     // GatewayNodeManager
@@ -350,6 +390,7 @@ private:
 
     // For rate limit
     ratelimiter::GatewayRateLimiter::Ptr m_gatewayRateLimiter;
+    std::optional<ReadOnlyFilter> m_readonlyFilter;
 };
 }  // namespace gateway
 }  // namespace bcos

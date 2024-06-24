@@ -188,6 +188,12 @@ void KeyPageStorage::asyncSetRow(std::string_view tableView, std::string_view ke
             BCOS_ERROR_UNIQUE_PTR(StorageError::ReadOnly, "Try to operate a read-only storage"));
         return;
     }
+
+    if (m_setRowWithDirtyFlag && entry.status() == Entry::NORMAL)
+    {
+        entry.setStatus(Entry::MODIFIED);
+    }
+
     m_writeLength += keyView.size();
     m_writeLength += entry.size();
     // if sys table, write cache and write to prev, return
@@ -335,7 +341,8 @@ void KeyPageStorage::parallelTraverse(bool onlyDirty,
                                 if (meta && meta->pageExist(k))
                                 {
                                     KeyPage_LOG(DEBUG)
-                                        << LOG_DESC("Traverse Page invalid key become valid");
+                                        << LOG_DESC("Traverse Page invalid key become valid")
+                                        << LOG_KV("key", toHex(k));
                                     continue;
                                 }
                                 Entry e;
@@ -360,7 +367,8 @@ void KeyPageStorage::parallelTraverse(bool onlyDirty,
     KeyPage_LOG(INFO) << LOG_DESC("parallelTraverse") << LOG_KV("size", m_size);
 }
 
-auto KeyPageStorage::hash(const bcos::crypto::Hash::Ptr& hashImpl) const -> crypto::HashType
+auto KeyPageStorage::hash(const bcos::crypto::Hash::Ptr& hashImpl,
+    const ledger::Features& features) const -> crypto::HashType
 {
     bcos::crypto::HashType pagesHash(0);
     bcos::crypto::HashType entriesHash(0);
@@ -395,9 +403,12 @@ auto KeyPageStorage::hash(const bcos::crypto::Hash::Ptr& hashImpl) const -> cryp
                     }
                     else
                     {  // sys table
-                        auto hash = hashImpl->hash(data->table);
-                        hash ^= hashImpl->hash(data->key);
-                        hash ^= entry.hash(data->table, data->key, hashImpl, m_blockVersion);
+                        auto hash = entry.hash(data->table, data->key, *hashImpl, m_blockVersion);
+                        if (!features.get(ledger::Features::Flag::bugfix_keypage_system_entry_hash))
+                        {  // v3.6.1 open this bugfix default
+                            hash ^= hashImpl->hash(data->table);
+                            hash ^= hashImpl->hash(data->key);
+                        }
                         localEntriesHash ^= hash;
                         ++entrycount;
                     }
@@ -411,6 +422,7 @@ auto KeyPageStorage::hash(const bcos::crypto::Hash::Ptr& hashImpl) const -> cryp
     totalHash ^= pagesHash;
     totalHash ^= entriesHash;
     KeyPage_LOG(INFO) << LOG_DESC("hash") << LOG_KV("size", allData.size())
+                      << LOG_KV("blockVersion", m_blockVersion)
                       << LOG_KV("readLength", m_readLength) << LOG_KV("writeLength", m_writeLength)
                       << LOG_KV("pageCount", pageCount) << LOG_KV("entrycount", entrycount)
                       << LOG_KV("entriesHash", entriesHash.hex())
@@ -551,8 +563,8 @@ void KeyPageStorage::rollback(const Recoder& recoder)
 }
 
 // if data not exist, create an empty one
-auto KeyPageStorage::getData(std::string_view tableView, std::string_view key, bool mustExist)
-    -> std::tuple<Error::UniquePtr, std::optional<KeyPageStorage::Data*>>
+auto KeyPageStorage::getData(std::string_view tableView, std::string_view key,
+    bool mustExist) -> std::tuple<Error::UniquePtr, std::optional<KeyPageStorage::Data*>>
 {
     // find from cache
     auto [bucket, lock] = getBucket(tableView, key);
@@ -561,7 +573,6 @@ auto KeyPageStorage::getData(std::string_view tableView, std::string_view key, b
     auto it = bucket->container.find(keyPair);
     if (it != bucket->container.end())
     {
-        // assert(it->first.second == key);
         auto* data = it->second.get();
         lock.unlock();
         return std::make_tuple(std::unique_ptr<Error>(nullptr), std::make_optional(data));
@@ -620,7 +631,7 @@ auto KeyPageStorage::getData(std::string_view tableView, std::string_view key, b
             {
                 KeyPage_LOG(ERROR)
                     << LOG_DESC("getData error") << LOG_KV("table", tableView)
-                    << LOG_KV("key", toHex(key)) << LOG_KV("error", error->errorMessage());
+                    << LOG_KV("key", toHex(key)) << LOG_KV("message", error->errorMessage());
                 return std::make_tuple(std::move(error), std::nullopt);
             }
             if (c_fileLogLevel <= TRACE)
@@ -674,8 +685,8 @@ auto KeyPageStorage::getData(std::string_view tableView, std::string_view key, b
     }
 }
 
-auto KeyPageStorage::getEntryFromPage(std::string_view table, std::string_view key)
-    -> std::pair<Error::UniquePtr, std::optional<Entry>>
+auto KeyPageStorage::getEntryFromPage(std::string_view table,
+    std::string_view key) -> std::pair<Error::UniquePtr, std::optional<Entry>>
 {
     // key is empty means the data is TableMeta
     auto [error, data] = getData(table, TABLE_META_KEY);
@@ -790,8 +801,8 @@ auto KeyPageStorage::getEntryFromPage(std::string_view table, std::string_view k
     return std::make_pair(nullptr, std::nullopt);
 }
 
-auto KeyPageStorage::setEntryToPage(std::string table, std::string key, Entry entry)
-    -> Error::UniquePtr
+auto KeyPageStorage::setEntryToPage(
+    std::string table, std::string key, Entry entry) -> Error::UniquePtr
 {
     auto [error, data] = getData(table, TABLE_META_KEY);
     if (error)
@@ -808,31 +819,53 @@ auto KeyPageStorage::setEntryToPage(std::string table, std::string key, Entry en
     {
         pageKey = pageInfoOption.value()->getPageKey();
         pageData = pageInfoOption.value()->getPageData();
+        if (pageData == nullptr)
+        {
+            bool shouldExist =
+                pageInfoOption.has_value() ? (pageInfoOption.value()->getCount() > 0) : false;
+            auto [e, pageDataOp] = getData(table, pageKey, shouldExist);
+            if (e)
+            {
+                return std::move(e);
+            }
+            pageData = pageDataOp.value();
+            if (pageInfoOption)
+            {
+                pageInfoOption.value()->setPageData(pageData);
+            }
+            auto* page = pageData->getPage();
+            if (shouldExist && page->validCount() != pageInfoOption.value()->getCount())
+            {
+                KeyPage_LOG(FATAL) << LOG_DESC("setEntry page valid count mismatch")
+                                   << LOG_KV("key", toHex(key)) << LOG_KV("pageKey", toHex(pageKey))
+                                   << LOG_KV("count", pageInfoOption.value()->getCount())
+                                   << LOG_KV("realCount", page->validCount());
+            }
+        }
+    }
+    else
+    {
+        // table is delete to empty, insert a new key
+        // which is an old pageKey then will read the wrong page
+        KeyPage_LOG(INFO) << LOG_DESC("empty table") << LOG_KV("table", table)
+                          << LOG_KV("key", toHex(key));
+        auto newData = std::make_shared<Data>();
+        newData->table = table;
+        newData->key = key;
+        newData->data = KeyPageStorage::Page();
+        newData->type = Data::Type::Page;
+        newData->entry.setStatus(Entry::Status::EMPTY);
+        {  // insert into cache
+            auto keyPair = std::make_pair(newData->table, newData->key);
+            auto [bucket, writeLock] = getMutBucket(newData->table, newData->key);
+            boost::ignore_unused(writeLock);
+            auto* data = bucket->container.emplace(std::make_pair(keyPair, std::move(newData)))
+                             .first->second.get();
+            pageData = data;
+        }
     }
     std::optional<Entry> entryOld;
-    if (pageData == nullptr)
-    {
-        bool shouldExist =
-            pageInfoOption.has_value() ? (pageInfoOption.value()->getCount() > 0) : false;
-        auto [e, pageDataOp] = getData(table, pageKey, shouldExist);
-        if (e)
-        {
-            return std::move(e);
-        }
-        pageData = pageDataOp.value();
-        if (pageInfoOption)
-        {
-            pageInfoOption.value()->setPageData(pageData);
-        }
-        auto* page = pageData->getPage();
-        if (shouldExist && page->validCount() != pageInfoOption.value()->getCount())
-        {
-            KeyPage_LOG(FATAL) << LOG_DESC("setEntry page valid count mismatch")
-                               << LOG_KV("key", toHex(key)) << LOG_KV("pageKey", toHex(pageKey))
-                               << LOG_KV("count", pageInfoOption.value()->getCount())
-                               << LOG_KV("realCount", page->validCount());
-        }
-    }
+
     // if new entry is too big, it will trigger split
     auto* page = pageData->getPage();
     page->setTableMeta(meta);
@@ -971,8 +1004,8 @@ auto KeyPageStorage::setEntryToPage(std::string table, std::string key, Entry en
     return nullptr;
 }
 
-auto KeyPageStorage::getRawEntryFromStorage(std::string_view table, std::string_view key)
-    -> std::pair<Error::UniquePtr, std::optional<Entry>>
+auto KeyPageStorage::getRawEntryFromStorage(std::string_view table,
+    std::string_view key) -> std::pair<Error::UniquePtr, std::optional<Entry>>
 {
     auto prev = getPrev();  // prev must not null
     if (!prev)
@@ -989,8 +1022,8 @@ auto KeyPageStorage::getRawEntryFromStorage(std::string_view table, std::string_
     });
     return getPromise.get_future().get();
 }
-auto KeyPageStorage::getSysTableRawEntry(std::string_view table, std::string_view key)
-    -> std::pair<Error::UniquePtr, std::optional<Entry>>
+auto KeyPageStorage::getSysTableRawEntry(std::string_view table,
+    std::string_view key) -> std::pair<Error::UniquePtr, std::optional<Entry>>
 {
     auto [bucket, lock] = getBucket(table, key);
     boost::ignore_unused(lock);
@@ -1012,8 +1045,8 @@ auto KeyPageStorage::getSysTableRawEntry(std::string_view table, std::string_vie
     return std::make_pair(std::move(error), entryOption);
 }
 
-auto KeyPageStorage::importExistingEntry(std::string_view table, std::string_view key, Entry entry)
-    -> Entry
+auto KeyPageStorage::importExistingEntry(
+    std::string_view table, std::string_view key, Entry entry) -> Entry
 {
     if (m_readOnly)
     {

@@ -43,11 +43,14 @@ public:
     JsonRpcInterface(JsonRpcInterface&&) = default;
     JsonRpcInterface& operator=(const JsonRpcInterface&) = default;
     JsonRpcInterface& operator=(JsonRpcInterface&&) = default;
-    virtual ~JsonRpcInterface() {}
+    virtual ~JsonRpcInterface() = default;
 
 public:
     virtual void call(std::string_view _groupID, std::string_view _nodeName, std::string_view _to,
         std::string_view _data, RespFunc _respFunc) = 0;
+
+    virtual void call(std::string_view _groupID, std::string_view _nodeName, std::string_view _to,
+        std::string_view _data, std::string_view _sign, RespFunc _respFunc) = 0;
 
     virtual void sendTransaction(std::string_view _groupID, std::string_view _nodeName,
         std::string_view _data, bool _requireProof, RespFunc _respFunc) = 0;
@@ -81,6 +84,9 @@ public:
 
     virtual void getObserverList(
         std::string_view _groupID, std::string_view _nodeName, RespFunc _respFunc) = 0;
+
+    virtual void getNodeListByType(std::string_view _groupID, std::string_view _nodeName,
+        std::string_view _nodeType, RespFunc _respFunc) = 0;
 
     virtual void getPbftView(
         std::string_view _groupID, std::string_view _nodeName, RespFunc _respFunc) = 0;
@@ -136,8 +142,16 @@ private:
 
     void callI(const Json::Value& req, RespFunc _respFunc)
     {
-        call(toView(req[0u]), toView(req[1u]), toView(req[2u]), toView(req[3u]),
-            std::move(_respFunc));
+        if (req.size() == 5U) [[unlikely]]
+        {
+            call(toView(req[0U]), toView(req[1U]), toView(req[2U]), toView(req[3U]),
+                toView(req[4U]), std::move(_respFunc));
+        }
+        else [[likely]]
+        {
+            call(toView(req[0U]), toView(req[1U]), toView(req[2U]), toView(req[3U]),
+                std::move(_respFunc));
+        }
     }
 
     void sendTransactionI(const Json::Value& req, RespFunc _respFunc)
@@ -201,6 +215,11 @@ private:
     void getObserverListI(const Json::Value& req, RespFunc _respFunc)
     {
         getObserverList(toView(req[0u]), toView(req[1u]), std::move(_respFunc));
+    }
+
+    void getNodeListByTypeI(const Json::Value& req, RespFunc _respFunc)
+    {
+        getNodeListByType(toView(req[0u]), toView(req[1u]), toView(req[2u]), std::move(_respFunc));
     }
 
     void getPbftViewI(const Json::Value& req, RespFunc _respFunc)

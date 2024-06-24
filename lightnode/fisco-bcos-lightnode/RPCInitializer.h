@@ -1,9 +1,5 @@
 #pragma once
 
-#include "client/LedgerClientImpl.h"
-#include "client/P2PClientImpl.h"
-#include "client/SchedulerClientImpl.h"
-#include "client/TransactionPoolClientImpl.h"
 #include <bcos-cpp-sdk/multigroup/JsonGroupInfoCodec.h>
 #include <bcos-cpp-sdk/ws/HandshakeResponse.h>
 #include <bcos-crypto/hasher/OpenSSLHasher.h>
@@ -25,9 +21,7 @@
 #include <libinitializer/ProtocolInitializer.h>
 #include <boost/exception/diagnostic_information.hpp>
 #include <boost/throw_exception.hpp>
-#include <exception>
 #include <memory>
-#include <thread>
 
 namespace bcos::lightnode
 {
@@ -43,19 +37,21 @@ static auto initRPC(bcos::tool::NodeConfig::Ptr nodeConfig, std::string nodeID,
     bcos::rpc::JsonRpcInterface::Ptr jsonrpc;
     auto wsConfig = rpcFactory.initConfig(nodeConfig);
     auto wsService = rpcFactory.buildWsService(wsConfig);
-    if(nodeConfig->smCryptoType())
+    if (nodeConfig->smCryptoType())
     {
         jsonrpc = std::make_shared<bcos::rpc::LightNodeRPC<decltype(localLedger),
-                decltype(remoteLedger), decltype(transactionPool), decltype(scheduler),
-                bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher>>(
-                        localLedger, remoteLedger,transactionPool, scheduler, nodeConfig->chainId(), nodeConfig->groupId());
+            decltype(remoteLedger), decltype(transactionPool), decltype(scheduler),
+            bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher>>(localLedger, remoteLedger,
+            transactionPool, scheduler, nodeConfig->chainId(), nodeConfig->groupId(),
+            bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{});
     }
     else
     {
         jsonrpc = std::make_shared<bcos::rpc::LightNodeRPC<decltype(localLedger),
-                decltype(remoteLedger), decltype(transactionPool), decltype(scheduler),
-                bcos::crypto::hasher::openssl::OpenSSL_Keccak256_Hasher>>(
-                        localLedger, remoteLedger,transactionPool, scheduler, nodeConfig->chainId(), nodeConfig->groupId());
+            decltype(remoteLedger), decltype(transactionPool), decltype(scheduler),
+            bcos::crypto::hasher::openssl::OpenSSL_Keccak256_Hasher>>(localLedger, remoteLedger,
+            transactionPool, scheduler, nodeConfig->chainId(), nodeConfig->groupId(),
+            bcos::crypto::hasher::openssl::OpenSSL_Keccak256_Hasher{});
     }
 
     wsService->registerMsgHandler(bcos::protocol::MessageType::HANDESHAKE,
@@ -66,7 +62,7 @@ static auto initRPC(bcos::tool::NodeConfig::Ptr nodeConfig, std::string nodeID,
             auto groupInfoCodec = std::make_shared<bcos::group::JsonGroupInfoCodec>();
             bcos::cppsdk::service::HandshakeResponse handshakeResponse(std::move(groupInfoCodec));
 
-            auto status = ~bcos::concepts::getRef(localLedger).getStatus();
+            auto status = bcos::task::syncWait(bcos::concepts::getRef(localLedger).getStatus());
 
             handshakeResponse.mutableGroupBlockNumber().insert(
                 std::make_pair(nodeConfig->groupId(), status.blockNumber));
@@ -98,6 +94,7 @@ static auto initRPC(bcos::tool::NodeConfig::Ptr nodeConfig, std::string nodeID,
             groupInfo->setGroupID(nodeConfig->groupId());
             groupInfo->setWasm(nodeConfig->isWasm());
             groupInfo->setIniConfig("");
+            groupInfo->setSmCryptoType(nodeConfig->smCryptoType());
 
             auto nodeInfo = std::make_shared<bcos::group::ChainNodeInfo>();
 
@@ -124,7 +121,7 @@ static auto initRPC(bcos::tool::NodeConfig::Ptr nodeConfig, std::string nodeID,
             protocol.setMaxVersion(1);
             protocol.setVersion(nodeConfig->compatibilityVersion());
             nodeInfo->setNodeProtocol(std::move(protocol));
-            nodeInfo->setNodeType(bcos::protocol::NodeType::None);
+            nodeInfo->setNodeType(bcos::protocol::NodeType::NONE);
             groupInfo->appendNodeInfo(std::move(nodeInfo));
 
             std::vector<bcos::group::GroupInfo::Ptr> groupInfoList{std::move(groupInfo)};

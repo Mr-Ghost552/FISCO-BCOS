@@ -1,7 +1,3 @@
-#include <bcos-tars-protocol/impl/TarsHashable.h>
-#include <bcos-tars-protocol/impl/TarsOutput.h>
-#include <bcos-tars-protocol/impl/TarsSerializable.h>
-
 #include "bcos-ledger/src/libledger/LedgerImpl.h"
 #include <bcos-concepts/ByteBuffer.h>
 #include <bcos-concepts/Serialize.h>
@@ -10,6 +6,11 @@
 #include <bcos-crypto/hasher/OpenSSLHasher.h>
 #include <bcos-framework/ledger/LedgerTypeDef.h>
 #include <bcos-framework/storage/Entry.h>
+#include <bcos-tars-protocol/impl/TarsHashable.h>
+#include <bcos-tars-protocol/impl/TarsOutput.h>
+#include <bcos-tars-protocol/impl/TarsSerializable.h>
+#include <bcos-tars-protocol/protocol/BlockFactoryImpl.h>
+#include <bcos-tars-protocol/protocol/BlockImpl.h>
 #include <bcos-tars-protocol/tars/Block.h>
 #include <bcos-tars-protocol/tars/Transaction.h>
 #include <bcos-tars-protocol/tars/TransactionMetaData.h>
@@ -177,7 +178,7 @@ BOOST_FIXTURE_TEST_SUITE(LedgerImplTest, LedgerImplFixture)
 BOOST_AUTO_TEST_CASE(getBlock)
 {
     bcos::ledger::LedgerImpl<bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher, MockMemoryStorage>
-        ledger{storage, nullptr, nullptr};
+        ledger{bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, storage, nullptr, nullptr};
 
     bcostars::Block block;
     bcos::task::syncWait(
@@ -233,7 +234,7 @@ BOOST_AUTO_TEST_CASE(getBlock)
 BOOST_AUTO_TEST_CASE(setBlockAndGetInfo)
 {
     LedgerImpl<bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher, MockMemoryStorage> ledger{
-        storage, nullptr, nullptr};
+        bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, storage, nullptr, nullptr};
 
     bcostars::Block block;
     block.blockHeader.data.blockNumber = 100;
@@ -255,15 +256,15 @@ BOOST_AUTO_TEST_CASE(setBlockAndGetInfo)
         block.transactions.emplace_back(std::move(transaction));
         block.receipts.emplace_back(std::move(receipt));
     }
-    bcos::task::syncWait(ledger.setTransactions<bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher>(
-        block.transactions));
+    bcos::task::syncWait(ledger.setTransactions(
+        bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, block.transactions));
 
-    bcos::concepts::hash::calculate<bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher>(
-        block, block.blockHeader.dataHash);
+    bcos::concepts::hash::calculate(
+        block, bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, block.blockHeader.dataHash);
 
     BOOST_CHECK_NO_THROW(bcos::task::syncWait(ledger.setBlock<bcos::concepts::ledger::ALL>(block)));
     bcostars::Block gotBlock;
-    ~ledger.getBlock<bcos::concepts::ledger::ALL>(100, gotBlock);
+    bcos::task::syncWait(ledger.getBlock<bcos::concepts::ledger::ALL>(100, gotBlock));
 
     BOOST_CHECK_EQUAL(gotBlock.blockHeader.data.blockNumber, block.blockHeader.data.blockNumber);
     BOOST_CHECK_EQUAL(gotBlock.transactions.size(), block.transactions.size());
@@ -277,8 +278,8 @@ BOOST_AUTO_TEST_CASE(setBlockAndGetInfo)
     bcos::task::syncWait(ledger.getBlockHashByNumber(100, hash));
 
     std::array<std::byte, 32> blockHash;
-    bcos::concepts::hash::calculate<bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher>(
-        gotBlock, blockHash);
+    bcos::concepts::hash::calculate(
+        gotBlock, bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, blockHash);
 
     int64_t newNumber = 100;
     bcos::task::syncWait(ledger.getBlockNumberByHash(hash, newNumber));
@@ -290,7 +291,7 @@ BOOST_AUTO_TEST_CASE(setBlockAndGetInfo)
 BOOST_AUTO_TEST_CASE(notExistsBlock)
 {
     LedgerImpl<bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher, MockMemoryStorage> ledger{
-        storage, nullptr, nullptr};
+        bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, storage, nullptr, nullptr};
 
     std::vector<std::byte> hash;
     bcos::task::syncWait(ledger.getBlockHashByNumber(50, hash));
@@ -307,11 +308,13 @@ BOOST_AUTO_TEST_CASE(ledgerSync)
 
     std::map<std::tuple<std::string, std::string>, bcos::storage::Entry, std::less<>> fromData;
     MockMemoryStorage fromStorage(fromData);
-    LedgerImpl<Hasher, MockMemoryStorage> fromLedger{std::move(fromStorage), nullptr, nullptr};
+    LedgerImpl<Hasher, MockMemoryStorage> fromLedger{
+        Hasher{}, std::move(fromStorage), nullptr, nullptr};
 
     std::map<std::tuple<std::string, std::string>, bcos::storage::Entry, std::less<>> toData;
     MockMemoryStorage toStorage(toData);
-    LedgerImpl<Hasher, MockMemoryStorage> toLedger{std::move(toStorage), nullptr, nullptr};
+    LedgerImpl<Hasher, MockMemoryStorage> toLedger{
+        Hasher{}, std::move(toStorage), nullptr, nullptr};
 
     bcostars::Block genesisBlock;
     genesisBlock.blockHeader.data.blockNumber = 0;
@@ -319,7 +322,7 @@ BOOST_AUTO_TEST_CASE(ledgerSync)
     bcos::task::syncWait(toLedger.setupGenesisBlock(genesisBlock));
 
     std::array<std::byte, 32> lastBlockHash;
-    bcos::concepts::hash::calculate<Hasher>(genesisBlock, lastBlockHash);
+    bcos::concepts::hash::calculate(genesisBlock, Hasher{}, lastBlockHash);
 
     constexpr static size_t blockCount = 50;
     for (auto number = 1U; number <= blockCount; ++number)
@@ -348,20 +351,20 @@ BOOST_AUTO_TEST_CASE(ledgerSync)
             }
 
             bcostars::TransactionMetaData metaData;
-            bcos::concepts::hash::calculate<Hasher>(transaction, metaData.hash);
+            bcos::concepts::hash::calculate(transaction, Hasher{}, metaData.hash);
 
             block.transactionsMetaData.emplace_back(std::move(metaData));
             block.transactions.emplace_back(std::move(transaction));
             block.receipts.emplace_back(std::move(receipt));
 
-            bcos::crypto::merkle::Merkle<Hasher> merkler;
+            bcos::crypto::merkle::Merkle merkler(Hasher{});
         }
-        bcos::task::syncWait(fromLedger.setTransactions<Hasher>(block.transactions));
-        bcos::task::syncWait(toLedger.setTransactions<Hasher>(block.transactions));
+        bcos::task::syncWait(fromLedger.setTransactions(Hasher{}, block.transactions));
+        bcos::task::syncWait(toLedger.setTransactions(Hasher{}, block.transactions));
 
         BOOST_CHECK_NO_THROW(
             bcos::task::syncWait(fromLedger.setBlock<bcos::concepts::ledger::ALL>(block)));
-        bcos::concepts::hash::calculate<Hasher>(block, lastBlockHash);
+        bcos::concepts::hash::calculate(block, Hasher{}, lastBlockHash);
     }
 
     bcos::task::syncWait(toLedger.sync<decltype(fromLedger), bcostars::Block>(fromLedger, false));

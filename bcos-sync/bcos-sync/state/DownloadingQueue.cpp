@@ -200,12 +200,49 @@ bool DownloadingQueue::verifyExecutedBlock(bcos::protocol::Block::Ptr const& _bl
     {
         BLKSYNC_LOG(ERROR) << LOG_DESC("verifyExecutedBlock failed for inconsistent hash")
                            << LOG_KV("orgHeader", printBlockHeader(orgBlockHeader)) << "\n"
-                           << LOG_KV("executedHeader", printBlockHeader(_blockHeader));
+                           << LOG_KV("executedHeader", printBlockHeader(_blockHeader)) << "\n"
+                           << printBlockHeaderDiff(orgBlockHeader, _blockHeader);
 
         return false;
     }
     return true;
 }
+
+std::string DownloadingQueue::printBlockHeaderDiff(
+    BlockHeader::Ptr const& orgHeader, BlockHeader::Ptr const& execHeader) const noexcept
+{
+    std::stringstream oss;
+    oss << "BlockHeader diff: \n";
+    oss << "-orgHash:       " << orgHeader->hash() << "\n"
+        << "+exeHash:       " << execHeader->hash() << "\n";
+    if (orgHeader->version() != execHeader->version()) [[unlikely]]
+    {
+        oss << "-orgVersion:    " << orgHeader->version() << "\n"
+            << "+exeVersion:    " << execHeader->version() << "\n";
+    }
+    if (orgHeader->txsRoot() != execHeader->txsRoot()) [[unlikely]]
+    {
+        oss << "-orgTxsRoot:    " << orgHeader->txsRoot() << "\n"
+            << "+exeTxsRoot:    " << execHeader->txsRoot() << "\n";
+    }
+    if (orgHeader->receiptsRoot() != execHeader->receiptsRoot()) [[likely]]
+    {
+        oss << "-orgRcptsRoot:  " << orgHeader->receiptsRoot() << "\n"
+            << "+exeRcptsRoot:  " << execHeader->receiptsRoot() << "\n";
+    }
+    if (orgHeader->stateRoot() != execHeader->stateRoot()) [[likely]]
+    {
+        oss << "-orgStateRoot:  " << orgHeader->stateRoot() << "\n"
+            << "+exeStateRoot:  " << execHeader->stateRoot() << "\n";
+    }
+    if (orgHeader->gasUsed() != execHeader->gasUsed()) [[likely]]
+    {
+        oss << "-orgGasUsed:    " << orgHeader->gasUsed() << "\n"
+            << "+exeGasUsed:    " << execHeader->gasUsed() << "\n";
+    }
+    return oss.str();
+}
+
 
 std::string DownloadingQueue::printBlockHeader(BlockHeader::Ptr const& _header) const noexcept
 {
@@ -293,13 +330,14 @@ void DownloadingQueue::applyBlock(Block::Ptr _block)
                 // execute/verify exception
                 if (_error != nullptr)
                 {
+                    config->setExecutedBlock(config->blockNumber());
                     // reset the executed number
                     BLKSYNC_LOG(WARNING)
                         << LOG_DESC("applyBlock: executing the downloaded block failed")
                         << LOG_KV("number", orgBlockHeader->number())
                         << LOG_KV("hash", orgBlockHeader->hash().abridged())
-                        << LOG_KV("errorCode", _error->errorCode())
-                        << LOG_KV("errorMessage", _error->errorMessage());
+                        << LOG_KV("code", _error->errorCode())
+                        << LOG_KV("message", _error->errorMessage());
                     if (_error->errorCode() == bcos::scheduler::SchedulerError::InvalidBlocks)
                     {
                         BLKSYNC_LOG(INFO)
@@ -310,7 +348,8 @@ void DownloadingQueue::applyBlock(Block::Ptr _block)
                     if (!config->masterNode())
                     {
                         BLKSYNC_LOG(INFO) << LOG_DESC(
-                            "applyBlock error: but do nothing for the node is not the master node");
+                            "applyBlock failed: but do nothing for the node is not the master "
+                            "node");
                         return;
                     }
                     {
@@ -327,7 +366,6 @@ void DownloadingQueue::applyBlock(Block::Ptr _block)
                             downloadQueue->m_blocks.push(_block);
                         }
                     }
-                    config->setExecutedBlock(config->blockNumber());
                     return;
                 }
                 if (!downloadQueue->verifyExecutedBlock(_block, _blockHeader))
@@ -382,7 +420,7 @@ void DownloadingQueue::applyBlock(Block::Ptr _block)
                 BLKSYNC_LOG(WARNING) << LOG_DESC("applyBlock exception")
                                      << LOG_KV("number", orgBlockHeader->number())
                                      << LOG_KV("hash", orgBlockHeader->hash().abridged())
-                                     << LOG_KV("error", boost::diagnostic_information(e));
+                                     << LOG_KV("message", boost::diagnostic_information(e));
             }
         });
 }
@@ -446,7 +484,7 @@ bool DownloadingQueue::checkAndCommitBlock(bcos::protocol::Block::Ptr _block)
             BLKSYNC_LOG(WARNING) << LOG_DESC("asyncCheckBlock exception")
                                  << LOG_KV("blockNumber", blockHeader->number())
                                  << LOG_KV("hash", blockHeader->hash().abridged())
-                                 << LOG_KV("error", boost::diagnostic_information(e));
+                                 << LOG_KV("message", boost::diagnostic_information(e));
         }
     });
     return true;
@@ -514,7 +552,7 @@ void DownloadingQueue::commitBlock(bcos::protocol::Block::Ptr _block)
     catch (std::exception const& e)
     {
         BLKSYNC_LOG(WARNING) << LOG_DESC("commitBlock exception")
-                             << LOG_KV("error", boost::diagnostic_information(e));
+                             << LOG_KV("message", boost::diagnostic_information(e));
     }
 }
 
@@ -578,7 +616,7 @@ void DownloadingQueue::commitBlockState(bcos::protocol::Block::Ptr _block)
             BLKSYNC_LOG(WARNING) << LOG_DESC("commitBlock exception")
                                  << LOG_KV("number", blockHeader->number())
                                  << LOG_KV("hash", blockHeader->hash().abridged())
-                                 << LOG_KV("error", boost::diagnostic_information(e));
+                                 << LOG_KV("message", boost::diagnostic_information(e));
         }
     });
 }
@@ -709,13 +747,15 @@ void DownloadingQueue::fetchAndUpdateLedgerConfig()
     {
         BLKSYNC_LOG(INFO) << LOG_DESC("fetchAndUpdateLedgerConfig");
         m_ledgerFetcher->fetchBlockNumberAndHash();
+        m_ledgerFetcher->fetchCompatibilityVersion();
+        m_ledgerFetcher->fetchFeatures();
         m_ledgerFetcher->fetchConsensusNodeList();
         // Note: must fetchObserverNode here to notify the latest sealerList and observerList to
         // txpool
         m_ledgerFetcher->fetchObserverNodeList();
+        m_ledgerFetcher->fetchCandidateSealerList();
         m_ledgerFetcher->fetchBlockTxCountLimit();
         m_ledgerFetcher->fetchConsensusLeaderPeriod();
-        m_ledgerFetcher->fetchCompatibilityVersion();
         auto ledgerConfig = m_ledgerFetcher->ledgerConfig();
         BLKSYNC_LOG(INFO) << LOG_DESC("fetchAndUpdateLedgerConfig success")
                           << LOG_KV("blockNumber", ledgerConfig->blockNumber())

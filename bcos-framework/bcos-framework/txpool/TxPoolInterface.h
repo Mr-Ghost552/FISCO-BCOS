@@ -28,9 +28,7 @@
 #include <boost/throw_exception.hpp>
 #include <stdexcept>
 
-namespace bcos
-{
-namespace txpool
+namespace bcos::txpool
 {
 class TxPoolInterface
 {
@@ -38,7 +36,7 @@ public:
     using Ptr = std::shared_ptr<TxPoolInterface>;
 
     TxPoolInterface() = default;
-    virtual ~TxPoolInterface() {}
+    virtual ~TxPoolInterface() = default;
 
     virtual void start() = 0;
     virtual void stop() = 0;
@@ -52,25 +50,36 @@ public:
     virtual task::Task<protocol::TransactionSubmitResult::Ptr> submitTransaction(
         [[maybe_unused]] protocol::Transaction::Ptr transaction)
     {
-        BOOST_THROW_EXCEPTION(std::runtime_error("No implement!"));
+        BOOST_THROW_EXCEPTION(std::runtime_error("Unimplemented!"));
     }
 
-    virtual task::Task<void> broadcastPushTransaction(
-        [[maybe_unused]] const protocol::Transaction& transaction)
+    virtual task::Task<protocol::TransactionSubmitResult::Ptr> submitTransactionWithHook(
+        [[maybe_unused]] protocol::Transaction::Ptr transaction,
+        [[maybe_unused]] std::function<void()> afterInsertHook)
     {
-        BOOST_THROW_EXCEPTION(std::runtime_error("No implement!"));
+        BOOST_THROW_EXCEPTION(std::runtime_error("Unimplemented!"));
     }
 
-    virtual task::Task<void> onReceivePushTransaction(
-        bcos::crypto::NodeIDPtr nodeID, const std::string& messageID, bytesConstRef data)
+    virtual void broadcastTransaction([[maybe_unused]] const protocol::Transaction& transaction)
     {
-        BOOST_THROW_EXCEPTION(std::runtime_error("No implement!"));
+        BOOST_THROW_EXCEPTION(std::runtime_error("Unimplemented!"));
     }
 
-    virtual task::Task<std::vector<protocol::Transaction::Ptr>> getMissedTransactions(
-        std::vector<crypto::HashType> transactionHashes, bcos::crypto::NodeIDPtr fromNodeID)
+    virtual void broadcastTransactionBuffer([[maybe_unused]] const bytesConstRef& _data)
     {
-        BOOST_THROW_EXCEPTION(std::runtime_error("No implement!"));
+        BOOST_THROW_EXCEPTION(std::runtime_error("Unimplemented!"));
+    }
+
+    virtual void broadcastTransactionBufferByTree([[maybe_unused]] const bytesConstRef& _data,
+        bool isStartNode = false, bcos::crypto::NodeIDPtr fromNode = nullptr)
+    {
+        BOOST_THROW_EXCEPTION(std::runtime_error("Unimplemented!"));
+    }
+
+    virtual task::Task<std::vector<protocol::Transaction::ConstPtr>> getTransactions(
+        RANGES::any_view<bcos::h256, RANGES::category::mask | RANGES::category::sized> hashes)
+    {
+        BOOST_THROW_EXCEPTION(std::runtime_error("Unimplemented!"));
     }
 
     /**
@@ -107,7 +116,7 @@ public:
      * @param _onBlockFilled callback to be called after the block has been filled
      */
     virtual void asyncFillBlock(bcos::crypto::HashListPtr _txsHash,
-        std::function<void(Error::Ptr, bcos::protocol::TransactionsPtr)> _onBlockFilled) = 0;
+        std::function<void(Error::Ptr, bcos::protocol::ConstTransactionsPtr)> _onBlockFilled) = 0;
 
     /**
      * @brief After the blockchain is on-chain, the interface is called to notify the transaction
@@ -147,5 +156,5 @@ public:
 
     virtual void tryToSyncTxsFromPeers() {}
 };
-}  // namespace txpool
-}  // namespace bcos
+
+}  // namespace bcos::txpool

@@ -1,25 +1,24 @@
 #pragma once
-#include "Scheduler.h"
-#include <tbb/task_group.h>
+#include "Coroutine.h"
+#include <oneapi/tbb/task_group.h>
 
-namespace bcos::task
+namespace bcos::task::tbb
 {
 
-class TBBScheduler : public Scheduler
+class TBBScheduler
 {
-public:
-    ~TBBScheduler() noexcept override { m_taskGroup.wait(); }
-
-    void execute(CO_STD::coroutine_handle<> handle) override
-    {
-        m_taskGroup.run([handle]() {
-            auto executeHandle = handle;
-            executeHandle.resume();
-        });
-    }
-
 private:
-    tbb::task_group m_taskGroup;
+    oneapi::tbb::task_group& m_taskGroup;
+
+public:
+    TBBScheduler(oneapi::tbb::task_group& taskGroup) : m_taskGroup(taskGroup) {}
+
+    constexpr static bool await_ready() noexcept { return false; }
+    void await_suspend([[maybe_unused]] CO_STD::coroutine_handle<> handle) noexcept
+    {
+        m_taskGroup.run([handle]() { const_cast<CO_STD::coroutine_handle<>&>(handle).resume(); });
+    }
+    constexpr static void await_resume() noexcept {}
 };
 
-}  // namespace bcos::task
+}  // namespace bcos::task::tbb

@@ -17,14 +17,12 @@
 #------------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.10)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "12" CACHE STRING "Minimum OS X deployment version")
 
 add_subdirectory(bcos-protocol)
 
 add_library(bcos-protocol INTERFACE)
 target_include_directories(bcos-protocol INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
     $<INSTALL_INTERFACE:include/bcos-protocol>
 )
 target_link_libraries(bcos-protocol INTERFACE ${CODEC_TARGET})
@@ -37,5 +35,5 @@ if (TESTS)
 endif()
 
 include(GNUInstallDirs)
-install(TARGETS bcos-protocol EXPORT fiscobcosTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+#install(TARGETS bcos-protocol EXPORT fiscobcosTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 install(DIRECTORY "bcos-protocol" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" FILES_MATCHING PATTERN "*.h")

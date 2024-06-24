@@ -25,18 +25,19 @@
 using namespace bcos;
 using namespace bcos::gateway;
 
-Session::Session(size_t _recvBufferSize)
+
+Session::Session(size_t _recvBufferSize, bool _forceSize)
   : m_maxRecvBufferSize(_recvBufferSize < MIN_SESSION_RECV_BUFFER_SIZE ?
                             MIN_SESSION_RECV_BUFFER_SIZE :
                             _recvBufferSize),
-    m_recvBuffer(MIN_SESSION_RECV_BUFFER_SIZE)
+    m_recvBuffer(_forceSize ? _recvBufferSize : MIN_SESSION_RECV_BUFFER_SIZE)
 {
     SESSION_LOG(INFO) << "[Session::Session] this=" << this
                       << LOG_KV("recvBufferSize", m_maxRecvBufferSize);
     m_idleCheckTimer = std::make_shared<bcos::Timer>(m_idleTimeInterval, "idleChecker");
 }
 
-Session::~Session()
+Session::~Session() noexcept
 {
     SESSION_LOG(INFO) << "[Session::~Session] this=" << this;
     try
@@ -68,6 +69,11 @@ NodeIPEndpoint Session::nodeIPEndpoint() const
 bool Session::active() const
 {
     auto server = m_server.lock();
+    return active(server);
+}
+
+bool Session::active(std::shared_ptr<bcos::gateway::Host>& server) const
+{
     return m_active && server && server->haveNetwork() && m_socket && m_socket->isConnected();
 }
 
@@ -78,13 +84,14 @@ void Session::asyncSendMessage(Message::Ptr message, Options options, SessionCal
     {
         return;
     }
-    if (!active())
+    if (!active(server))
     {
         SESSION_LOG(WARNING) << "Session inactive";
         if (callback)
         {
-            server->threadPool()->enqueue(
-                [callback] { callback(NetworkException(-1, "Session inactive"), Message::Ptr()); });
+            server->asyncTo([callback = std::move(callback)] {
+                callback(NetworkException(-1, "Session inactive"), Message::Ptr());
+            });
         }
         return;
     }
@@ -97,7 +104,7 @@ void Session::asyncSendMessage(Message::Ptr message, Options options, SessionCal
                              << LOG_KV("allowMaxMsgSize", allowMaxMsgSize());
         if (callback)
         {
-            server->threadPool()->enqueue([callback] {
+            server->asyncTo([callback = std::move(callback)] {
                 callback(NetworkException(-1, "Msg size overflow"), Message::Ptr());
             });
         }
@@ -114,7 +121,8 @@ void Session::asyncSendMessage(Message::Ptr message, Options options, SessionCal
             auto error = result.value();
             auto errorCode = error.errorCode();
             auto errorMessage = error.errorMessage();
-            server->threadPool()->enqueue([callback, errorCode, errorMessage] {
+            server->asyncTo([callback = std::move(callback), errorCode,
+                                errorMessage = std::move(errorMessage)] {
                 callback(NetworkException((int64_t)errorCode, errorMessage), Message::Ptr());
             });
         }
@@ -145,7 +153,7 @@ void Session::asyncSendMessage(Message::Ptr message, Options options, SessionCal
                 catch (std::exception const& e)
                 {
                     SESSION_LOG(WARNING) << LOG_DESC("async_wait exception")
-                                         << LOG_KV("error", boost::diagnostic_information(e));
+                                         << LOG_KV("message", boost::diagnostic_information(e));
                 }
             });
             handler->timeoutHandler = timeoutHandler;
@@ -214,12 +222,14 @@ void Session::onWrite(boost::system::error_code ec, std::size_t /*unused*/)
             drop(TCPError);
             return;
         }
+        if (m_writing)
         {
-            if (m_writing)
-            {
-                m_writing = false;
-            }
             m_writeConstBuffer.clear();
+            m_writing = false;
+        }
+        else
+        {
+            SESSION_LOG(ERROR) << LOG_DESC("onWrite wrong state") << LOG_KV("m_writing", m_writing);
         }
 
         write();
@@ -292,7 +302,9 @@ std::size_t Session::tryPopSomeEncodedMsgs(std::vector<EncodedMessage::Ptr>& enc
 
 void Session::write()
 {
-    if (!active())
+    // TODO: use reference instead of weak_ptr
+    auto server = m_server.lock();
+    if (!active(server))
     {
         return;
     }
@@ -300,13 +312,11 @@ void Session::write()
     try
     {
         std::vector<EncodedMessage::Ptr> encodedMsgs;
-
         Guard lockGuard(x_writeQueue);
         if (m_writing)
         {
             return;
         }
-
         m_writing = true;
 
         if (m_writeQueue.empty())
@@ -320,7 +330,6 @@ void Session::write()
         // data
         tryPopSomeEncodedMsgs(encodedMsgs, m_maxSendDataSize, m_maxSendMsgCountS);
 
-        auto server = m_server.lock();
         if (server && server->haveNetwork())
         {
             if (m_socket->isConnected())
@@ -386,15 +395,14 @@ void Session::drop(DisconnectReason _reason)
 
     if (server && m_messageHandler)
     {
-        auto handler = m_messageHandler;
-        auto self = std::weak_ptr<Session>(shared_from_this());
-        server->threadPool()->enqueue([handler, self, errorCode, errorMsg]() {
+        server->asyncTo([self = weak_from_this(), errorCode, errorMsg = std::move(errorMsg)]() {
             auto session = self.lock();
             if (!session)
             {
                 return;
             }
-            handler(NetworkException(errorCode, errorMsg), session, Message::Ptr());
+            session->m_messageHandler(
+                NetworkException(errorCode, errorMsg), session, Message::Ptr());
         });
     }
 
@@ -411,9 +419,9 @@ void Session::drop(DisconnectReason _reason)
             }
             else
             {
-                SESSION_LOG(WARNING) << "[drop] closing remote " << m_socket->remoteEndpoint()
-                                     << LOG_KV("reason", reasonOf(_reason))
-                                     << LOG_KV("endpoint", m_socket->nodeIPEndpoint());
+                SESSION_LOG(INFO) << "[drop] closing remote " << m_socket->remoteEndpoint()
+                                  << LOG_KV("reason", reasonOf(_reason))
+                                  << LOG_KV("endpoint", m_socket->nodeIPEndpoint());
             }
 
             /// if get Host object failed, close the socket directly
@@ -430,16 +438,16 @@ void Session::drop(DisconnectReason _reason)
                 /// drop operation has been aborted
                 if (error == boost::asio::error::operation_aborted)
                 {
-                    SESSION_LOG(DEBUG) << "[drop] operation aborted  by async_shutdown"
-                                       << LOG_KV("errorValue", error.value())
-                                       << LOG_KV("message", error.message());
+                    SESSION_LOG(DEBUG)
+                        << "[drop] operation aborted  by async_shutdown"
+                        << LOG_KV("value", error.value()) << LOG_KV("message", error.message());
                     return;
                 }
                 /// shutdown timer error
                 if (error && error != boost::asio::error::operation_aborted)
                 {
                     SESSION_LOG(WARNING)
-                        << "[drop] shutdown timer error" << LOG_KV("errorValue", error.value())
+                        << "[drop] shutdown timer failed" << LOG_KV("failedValue", error.value())
                         << LOG_KV("message", error.message());
                 }
                 /// force to shutdown when timeout
@@ -457,8 +465,8 @@ void Session::drop(DisconnectReason _reason)
                     shutdown_timer->cancel();
                     if (error)
                     {
-                        SESSION_LOG(WARNING)
-                            << "[drop] shutdown failed " << LOG_KV("errorValue", error.value())
+                        SESSION_LOG(INFO)
+                            << "[drop] shutdown failed " << LOG_KV("failedValue", error.value())
                             << LOG_KV("message", error.message());
                     }
                     /// force to close the socket
@@ -471,7 +479,9 @@ void Session::drop(DisconnectReason _reason)
                 });
         }
         catch (...)
-        {}
+        {
+            SESSION_LOG(ERROR) << LOG_DESC("drop error") << LOG_KV("endpoint", nodeIPEndpoint());
+        }
     }
 }
 
@@ -491,7 +501,7 @@ void Session::start()
             m_lastWriteTime.store(utcSteadyTime());
             m_lastReadTime.store(utcSteadyTime());
             server->asioInterface()->strandPost(
-                boost::bind(&Session::doRead, shared_from_this()));  // doRead();
+                [session = shared_from_this()] { session->doRead(); });
         }
     }
 
@@ -520,7 +530,7 @@ void Session::doRead()
             {
                 if (ec)
                 {
-                    SESSION_LOG(WARNING)
+                    SESSION_LOG(INFO)
                         << LOG_DESC("doRead error") << LOG_KV("endpoint", session->nodeIPEndpoint())
                         << LOG_KV("message", ec.message());
                     session->drop(TCPError);
@@ -550,6 +560,7 @@ void Session::doRead()
                         else if (result == 0)
                         {
                             auto length = message->lengthDirect();
+                            assert(length <= session->allowMaxMsgSize());
                             if (length > session->allowMaxMsgSize())
                             {
                                 SESSION_LOG(ERROR)
@@ -610,7 +621,7 @@ void Session::doRead()
                     catch (std::exception const& e)
                     {
                         SESSION_LOG(ERROR) << LOG_DESC("Decode message exception")
-                                           << LOG_KV("error", boost::diagnostic_information(e));
+                                           << LOG_KV("message", boost::diagnostic_information(e));
                         session->onMessage(NetworkException(P2PExceptionType::ProtocolError,
                                                "ProtocolError(decode msg exception)"),
                             message);
@@ -665,15 +676,14 @@ void Session::onMessage(NetworkException const& e, Message::Ptr message)
     {
         return;
     }
-    auto self = std::weak_ptr<Session>(shared_from_this());
-    server->threadPool()->enqueue([e, message, self]() {
-        auto session = self.lock();
-        if (!session)
-        {
-            return;
-        }
+    server->asyncTo([self = weak_from_this(), e, message]() {
         try
         {
+            auto session = self.lock();
+            if (!session)
+            {
+                return;
+            }
             // TODO: move the logic to Service for deal with the forwarding message
             if (!message->dstP2PNodeID().empty() &&
                 message->dstP2PNodeID() != session->m_hostNodeID)
@@ -745,10 +755,7 @@ void Session::onTimeout(const boost::system::error_code& error, uint32_t seq)
     {
         return;
     }
-
-    SESSION_LOG(DEBUG) << LOG_BADGE("onTimeout") << LOG_KV("seq", seq);
-
-    server->threadPool()->enqueue([callback]() {
+    server->asyncTo([callback = std::move(callback)]() {
         NetworkException e(P2PExceptionType::NetworkTimeout, "NetworkTimeout");
         callback->callback(e, Message::Ptr());
     });

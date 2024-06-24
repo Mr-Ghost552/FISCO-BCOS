@@ -27,8 +27,8 @@
 #include "sync/interfaces/TransactionSyncInterface.h"
 #include "txpool/interfaces/TxPoolStorageInterface.h"
 #include <bcos-framework/txpool/TxPoolInterface.h>
+#include <bcos-tool/TreeTopology.h>
 #include <bcos-utilities/ThreadPool.h>
-#include <tbb/task_group.h>
 #include <thread>
 namespace bcos::txpool
 {
@@ -37,41 +37,28 @@ class TxPool : public TxPoolInterface, public std::enable_shared_from_this<TxPoo
 public:
     using Ptr = std::shared_ptr<TxPool>;
     TxPool(TxPoolConfig::Ptr config, TxPoolStorageInterface::Ptr txpoolStorage,
-        bcos::sync::TransactionSyncInterface::Ptr transactionSync, size_t verifierWorkerNum = 1)
-      : m_config(std::move(config)),
-        m_txpoolStorage(std::move(txpoolStorage)),
-        m_transactionSync(std::move(transactionSync)),
-        m_frontService(m_transactionSync->config()->frontService()),
-        m_transactionFactory(m_config->blockFactory()->transactionFactory()),
-        m_ledger(m_config->ledger())
-    {
-        m_worker = std::make_shared<ThreadPool>("submitter", 4);
-        m_verifier = std::make_shared<ThreadPool>("verifier", 2);
-        m_sealer = std::make_shared<ThreadPool>("txsSeal", 1);
-        // worker to pre-store-txs
-        m_txsPreStore = std::make_shared<ThreadPool>("txsPreStore", 1);
-        TXPOOL_LOG(INFO) << LOG_DESC("create TxPool")
-                         << LOG_KV("submitterWorkerNum", verifierWorkerNum);
-    }
+        bcos::sync::TransactionSyncInterface::Ptr transactionSync, size_t verifierWorkerNum = 1);
 
-    ~TxPool() noexcept override { stop(); }
-
+    ~TxPool() noexcept override;
     void start() override;
     void stop() override;
 
-    // For transaction sync
+    // New interfaces ==================
     task::Task<protocol::TransactionSubmitResult::Ptr> submitTransaction(
         protocol::Transaction::Ptr transaction) override;
 
-    task::Task<void> broadcastPushTransaction(const protocol::Transaction& transaction) override;
+    task::Task<protocol::TransactionSubmitResult::Ptr> submitTransactionWithHook(
+        protocol::Transaction::Ptr transaction, std::function<void()> onTxSubmitted) override;
 
-    task::Task<void> onReceivePushTransaction(
-        bcos::crypto::NodeIDPtr nodeID, const std::string& messageID, bytesConstRef data) override;
+    void broadcastTransaction(const protocol::Transaction& transaction) override;
+    void broadcastTransactionBuffer(const bytesConstRef& _data) override;
+    void broadcastTransactionBufferByTree(const bcos::bytesConstRef& _data,
+        bool isStartNode = false, bcos::crypto::NodeIDPtr fromNode = nullptr) override;
 
-    task::Task<std::vector<protocol::Transaction::Ptr>> getMissedTransactions(
-        std::vector<crypto::HashType> transactionHashes,
-        bcos::crypto::NodeIDPtr fromNodeID) override;
-    // ended
+    task::Task<std::vector<protocol::Transaction::ConstPtr>> getTransactions(
+        RANGES::any_view<bcos::h256, RANGES::category::mask | RANGES::category::sized> hashes)
+        override;
+    // ===============================
 
     // sealer module call this method for seal a block
     void asyncSealTxs(uint64_t _txsLimit, TxsHashSetPtr _avoidTxs,
@@ -89,25 +76,26 @@ public:
         std::function<void(Error::Ptr, bool)> _onVerifyFinished) override;
 
     // hook for tx/consensus sync message receive
-    // FIXME: deprecated, since use broadcastPushTransaction
     void asyncNotifyTxsSyncMessage(bcos::Error::Ptr _error, std::string const& _uuid,
         bcos::crypto::NodeIDPtr _nodeID, bytesConstRef _data,
         std::function<void(Error::Ptr)> _onRecv) override;
 
-    // hook for validator, update consensus nodes info in config, for broadcast tx to consensus
-    // nodes
-    // FIXME: deprecated, not used when use txpool::broadcastPushTransaction
+    // hook for validator, update consensus nodes info in config
+    // Note: txpool should use this interface to update consensus nodes info
+    // use this nodes info to check whether tx is from group member or not
     void notifyConsensusNodeList(bcos::consensus::ConsensusNodeList const& _consensusNodeList,
         std::function<void(Error::Ptr)> _onRecvResponse) override;
 
-    // hook for validator, update observer nodes info in config, for broadcast tx to observer nodes
-    // FIXME: deprecated, not used when use txpool::broadcastPushTransaction
+    // hook for validator, update observer nodes info in config
+    // Note: txpool should use this interface to update observer nodes info
+    // use this nodes info to check whether tx is from group member or not
     void notifyObserverNodeList(bcos::consensus::ConsensusNodeList const& _observerNodeList,
         std::function<void(Error::Ptr)> _onRecvResponse) override;
 
     // for scheduler to fetch txs
     void asyncFillBlock(bcos::crypto::HashListPtr _txsHash,
-        std::function<void(Error::Ptr, bcos::protocol::TransactionsPtr)> _onBlockFilled) override;
+        std::function<void(Error::Ptr, bcos::protocol::ConstTransactionsPtr)> _onBlockFilled)
+        override;
 
     // for consensus and sealer, for batch mark txs sealed flag
     // trigger scene such as view change, submit proposal, etc.
@@ -117,71 +105,48 @@ public:
 
     void asyncResetTxPool(std::function<void(Error::Ptr)> _onRecvResponse) override;
 
-    TxPoolConfig::Ptr txpoolConfig() { return m_config; }
-    TxPoolStorageInterface::Ptr txpoolStorage() { return m_txpoolStorage; }
+    TxPoolConfig::Ptr txpoolConfig();
+    TxPoolStorageInterface::Ptr txpoolStorage();
 
-    auto& transactionSync() { return m_transactionSync; }
-    void setTransactionSync(bcos::sync::TransactionSyncInterface::Ptr _transactionSync)
-    {
-        m_transactionSync = std::move(_transactionSync);
-    }
+    bcos::sync::TransactionSyncInterface::Ptr& transactionSync();
+    void setTransactionSync(bcos::sync::TransactionSyncInterface::Ptr _transactionSync);
 
     virtual void init();
     virtual void registerUnsealedTxsNotifier(
-        std::function<void(size_t, std::function<void(Error::Ptr)>)> _unsealedTxsNotifier)
-    {
-        m_txpoolStorage->registerUnsealedTxsNotifier(std::move(_unsealedTxsNotifier));
-    }
+        std::function<void(size_t, std::function<void(Error::Ptr)>)> _unsealedTxsNotifier);
 
     void asyncGetPendingTransactionSize(
-        std::function<void(Error::Ptr, uint64_t)> _onGetTxsSize) override
-    {
-        if (!_onGetTxsSize)
-        {
-            return;
-        }
-        auto pendingTxsSize = m_txpoolStorage->size();
-        _onGetTxsSize(nullptr, pendingTxsSize);
-    }
+        std::function<void(Error::Ptr, uint64_t)> _onGetTxsSize) override;
 
-    // deprecated
     void notifyConnectedNodes(bcos::crypto::NodeIDSet const& _connectedNodes,
-        std::function<void(Error::Ptr)> _onResponse) override
-    {
-        m_transactionSync->config()->notifyConnectedNodes(_connectedNodes, _onResponse);
-        if (m_txpoolStorage->size() > 0)
-        {
-            return;
-        }
-        // try to broadcast empty txsStatus and request txs from the connected nodes when the txpool
-        // is empty
-        m_transactionSync->onEmptyTxs();
-    }
+        std::function<void(Error::Ptr)> _onResponse) override;
 
-    void tryToSyncTxsFromPeers() override { m_transactionSync->onEmptyTxs(); }
+    void tryToSyncTxsFromPeers() override;
 
     // for UT
-    void setTxPoolStorage(TxPoolStorageInterface::Ptr _txpoolStorage)
+    void setTxPoolStorage(TxPoolStorageInterface::Ptr _txpoolStorage);
+
+    void registerTxsCleanUpSwitch(std::function<bool()> _txsCleanUpSwitch) override;
+
+    void clearAllTxs() override;
+
+    void setTreeRouter(bcos::tool::TreeTopology::Ptr _treeRouter)
     {
-        m_txpoolStorage = _txpoolStorage;
-        m_transactionSync->config()->setTxPoolStorage(_txpoolStorage);
+        m_treeRouter = std::move(_treeRouter);
     }
 
-    void registerTxsCleanUpSwitch(std::function<bool()> _txsCleanUpSwitch) override
-    {
-        m_txpoolStorage->registerTxsCleanUpSwitch(_txsCleanUpSwitch);
-    }
+    auto treeRouter() const { return m_treeRouter; }
 
-    void clearAllTxs() override { m_txpoolStorage->clear(); }
+    void setCheckBlockLimit(bool _checkBlockLimit) { m_checkBlockLimit = _checkBlockLimit; }
 
 protected:
     virtual bool checkExistsInGroup(bcos::protocol::TxSubmitCallback _txSubmitCallback);
     virtual void getTxsFromLocalLedger(bcos::crypto::HashListPtr _txsHash,
         bcos::crypto::HashListPtr _missedTxs,
-        std::function<void(Error::Ptr, bcos::protocol::TransactionsPtr)> _onBlockFilled);
+        std::function<void(Error::Ptr, bcos::protocol::ConstTransactionsPtr)> _onBlockFilled);
 
     virtual void fillBlock(bcos::crypto::HashListPtr _txsHash,
-        std::function<void(Error::Ptr, bcos::protocol::TransactionsPtr)> _onBlockFilled,
+        std::function<void(Error::Ptr, bcos::protocol::ConstTransactionsPtr)> _onBlockFilled,
         bool _fetchFromLedger = true);
 
     void initSendResponseHandler();
@@ -192,7 +157,6 @@ private:
     TxPoolConfig::Ptr m_config;
     TxPoolStorageInterface::Ptr m_txpoolStorage;
     bcos::sync::TransactionSyncInterface::Ptr m_transactionSync;
-    bcos::front::FrontServiceInterface::Ptr m_frontService;
     bcos::protocol::TransactionFactory::Ptr m_transactionFactory;
     bcos::ledger::LedgerInterface::Ptr m_ledger;
 
@@ -203,10 +167,12 @@ private:
     ThreadPool::Ptr m_verifier;
     ThreadPool::Ptr m_sealer;
     ThreadPool::Ptr m_txsPreStore;
+    tool::TreeTopology::Ptr m_treeRouter = nullptr;
     std::atomic_bool m_running = {false};
 
     // Note: This x_markTxsMutex is used for locking asyncSealTxs() during sealBlock
     // because memory storage is not contain a big lock now
     mutable bcos::SharedMutex x_markTxsMutex;
+    bool m_checkBlockLimit = true;
 };
 }  // namespace bcos::txpool

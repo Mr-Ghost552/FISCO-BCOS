@@ -25,7 +25,6 @@
 #pragma once
 
 #include "StateStorageInterface.h"
-#include "bcos-framework/storage/Table.h"
 #include <bcos-crypto/interfaces/crypto/Hash.h>
 #include <bcos-utilities/Error.h>
 #include <tbb/blocked_range.h>
@@ -39,7 +38,6 @@
 #include <boost/multi_index/sequenced_index.hpp>
 #include <boost/multi_index_container.hpp>
 #include <mutex>
-#include <range/v3/view/any_view.hpp>
 
 namespace bcos::storage
 {
@@ -50,11 +48,10 @@ class BaseStorage : public virtual storage::StateStorageInterface,
 public:
     using Ptr = std::shared_ptr<BaseStorage<enableLRU>>;
 
-    explicit BaseStorage(std::shared_ptr<StorageInterface> prev,
-        uint32_t _blockVersion = (uint32_t)bcos::protocol::BlockVersion::V3_0_VERSION)
+    BaseStorage(std::shared_ptr<StorageInterface> prev, bool setRowWithDirtyFlag)
       : storage::StateStorageInterface(prev),
-        m_blockVersion(_blockVersion),
-        m_buckets(std::thread::hardware_concurrency())
+        m_buckets(std::thread::hardware_concurrency()),
+        m_setRowWithDirtyFlag(setRowWithDirtyFlag)
     {}
 
     BaseStorage(const BaseStorage&) = delete;
@@ -316,9 +313,11 @@ public:
         ssize_t updatedCapacity = entry.size();
         std::optional<Entry> entryOld;
 
+        if (m_setRowWithDirtyFlag && entry.status() == Entry::NORMAL)
+        {
+            entry.setStatus(Entry::MODIFIED);
+        }
         auto [bucket, lock] = getBucket(tableView, keyView);
-        boost::ignore_unused(lock);
-
         auto it = bucket->container.find(std::make_tuple(tableView, keyView));
         if (it != bucket->container.end())
         {
@@ -328,16 +327,16 @@ public:
             updatedCapacity -= entryOld->size();
 
             bucket->container.modify(it, [&entry](Data& data) { data.entry = std::move(entry); });
-
-            if constexpr (enableLRU)
-            {
-                updateMRUAndCheck(*bucket, it);
-            }
         }
         else
         {
-            bucket->container.emplace(
+            auto [iter, _] = bucket->container.emplace(
                 Data{std::string(tableView), std::string(keyView), std::move(entry)});
+            it = iter;
+        }
+        if constexpr (enableLRU)
+        {
+            updateMRUAndCheck(*bucket, it);
         }
 
         if (m_recoder.local())
@@ -395,47 +394,50 @@ public:
         STORAGE_LOG(INFO) << "Successful merged records" << LOG_KV("count", count);
     }
 
-    crypto::HashType hash(const bcos::crypto::Hash::Ptr& hashImpl) const override
+    crypto::HashType hash(
+        const bcos::crypto::Hash::Ptr& hashImpl, const ledger::Features& features) const override
     {
         bcos::crypto::HashType totalHash;
+        auto blockVersion = features.get(ledger::Features::Flag::bugfix_statestorage_hash) ?
+                                (uint32_t)bcos::protocol::BlockVersion::V3_1_VERSION :
+                                (uint32_t)bcos::protocol::BlockVersion::V3_0_VERSION;
 
         std::vector<bcos::crypto::HashType> hashes(m_buckets.size());
-        tbb::parallel_for(tbb::blocked_range<size_t>(0U, m_buckets.size()),
-            [this, &hashImpl, &hashes](auto const& range) {
-                for (auto i = range.begin(); i < range.end(); ++i)
+        tbb::parallel_for(tbb::blocked_range<size_t>(0U, m_buckets.size()), [&, this](
+                                                                                auto const& range) {
+            for (auto i = range.begin(); i < range.end(); ++i)
+            {
+                auto& bucket = m_buckets[i];
+
+                bcos::crypto::HashType bucketHash(0);
+                for (auto& it : bucket.container)
                 {
-                    auto& bucket = m_buckets[i];
-
-                    bcos::crypto::HashType bucketHash(0);
-                    for (auto& it : bucket.container)
+                    auto& entry = it.entry;
+                    if (entry.dirty())
                     {
-                        auto& entry = it.entry;
-                        if (entry.dirty())
+                        bcos::crypto::HashType entryHash;
+                        if (blockVersion >= (uint32_t)bcos::protocol::BlockVersion::V3_1_VERSION)
                         {
-                            bcos::crypto::HashType entryHash;
-                            if (m_blockVersion >=
-                                (uint32_t)bcos::protocol::BlockVersion::V3_1_VERSION)
-                            {
-                                entryHash = entry.hash(it.table, it.key, hashImpl, m_blockVersion);
-                            }
-                            else
-                            {  // v3.0.0
-                                entryHash = hashImpl->hash(it.table) ^ hashImpl->hash(it.key) ^
-                                            entry.hash(it.table, it.key, hashImpl, m_blockVersion);
-                            }
-                            bucketHash ^= entryHash;
+                            entryHash = entry.hash(it.table, it.key, *hashImpl, blockVersion);
                         }
+                        else
+                        {  // v3.0.0-v3.2.0 use this which will make it not compatible with
+                           // v3.1.0 keyPageStorage
+                            entryHash = hashImpl->hash(it.table) ^ hashImpl->hash(it.key) ^
+                                        entry.hash(it.table, it.key, *hashImpl, blockVersion);
+                        }
+                        bucketHash ^= entryHash;
                     }
-
-                    hashes[i] ^= bucketHash;
                 }
-            });
+
+                hashes[i] ^= bucketHash;
+            }
+        });
 
         for (auto const& it : hashes)
         {
             totalHash ^= it;
         }
-
 
         return totalHash;
     }
@@ -592,6 +594,7 @@ private:
     };
     uint32_t m_blockVersion = 0;
     std::vector<Bucket> m_buckets;
+    bool m_setRowWithDirtyFlag = false;
 
     std::tuple<Bucket*, std::unique_lock<std::mutex>> getBucket(
         const std::string_view& table, const std::string_view& key)

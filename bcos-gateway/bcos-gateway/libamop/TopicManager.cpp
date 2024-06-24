@@ -71,7 +71,7 @@ bool TopicManager::parseSubTopicsJson(const std::string& _json, TopicItems& _top
     catch (const std::exception& e)
     {
         TOPIC_LOG(ERROR) << LOG_BADGE("parseSubTopicsJson")
-                         << LOG_KV("error", boost::diagnostic_information(e))
+                         << LOG_KV("message", boost::diagnostic_information(e))
                          << LOG_KV("json:", _json);
         return false;
     }
@@ -104,7 +104,10 @@ void TopicManager::subTopic(const std::string& _client, const TopicItems& _topic
     {
         std::unique_lock lock(x_clientTopics);
         m_client2TopicItems[_client] = _topicItems;  // Override the previous value
-        incTopicSeq();
+        if (!_topicItems.empty())
+        {
+            incTopicSeq();
+        }
     }
     createAndGetServiceByClient(_client);
     TOPIC_LOG(INFO) << LOG_BADGE("subTopic") << LOG_KV("client", _client)
@@ -178,7 +181,10 @@ void TopicManager::removeTopicsByClient(const std::string& _client)
         result = m_client2TopicItems.erase(_client);
     }
 
-    incTopicSeq();
+    if (result != 0)
+    {
+        incTopicSeq();
+    }
 
     TOPIC_LOG(INFO) << LOG_BADGE("removeTopicsByClient") << LOG_KV("client", _client)
                     << LOG_KV("success", result);
@@ -223,7 +229,7 @@ std::string TopicManager::queryTopicsSubByClient()
     catch (const std::exception& e)
     {
         TOPIC_LOG(ERROR) << LOG_BADGE("queryTopicsSubByClient")
-                         << LOG_KV("error", boost::diagnostic_information(e));
+                         << LOG_KV("message", boost::diagnostic_information(e));
         return "";
     }
 }
@@ -272,7 +278,7 @@ bool TopicManager::parseTopicItemsJson(
     catch (const std::exception& e)
     {
         TOPIC_LOG(ERROR) << LOG_BADGE("parseTopicItemsJson") << LOG_DESC("parse json exception")
-                         << LOG_KV("error", boost::diagnostic_information(e))
+                         << LOG_KV("message", boost::diagnostic_information(e))
                          << LOG_KV("json:", _json);
         return false;
     }
@@ -435,7 +441,7 @@ bcos::rpc::RPCInterface::Ptr TopicManager::createAndGetServiceByClient(std::stri
     catch (std::exception const& e)
     {
         TOPIC_LOG(WARNING) << LOG_DESC("createAndGetServiceByClient exception")
-                           << LOG_KV("error", boost::diagnostic_information(e));
+                           << LOG_KV("message", boost::diagnostic_information(e));
     }
     return nullptr;
 }
@@ -467,7 +473,7 @@ void TopicManager::notifyRpcToSubscribeTopics()
                 [this, endPointStr](Error::Ptr _error, std::string _topicInfo) {
                     if (_error)
                     {
-                        TOPIC_LOG(INFO) << LOG_DESC("asyncNotifySubscribeTopic error")
+                        TOPIC_LOG(INFO) << LOG_DESC("asyncNotifySubscribeTopic failed")
                                         << LOG_KV("endPoint", endPointStr)
                                         << LOG_KV("code", _error->errorCode())
                                         << LOG_KV("msg", _error->errorMessage());
@@ -484,6 +490,6 @@ void TopicManager::notifyRpcToSubscribeTopics()
     catch (std::exception const& e)
     {
         TOPIC_LOG(WARNING) << LOG_DESC("notifyRpcToSubscribeTopics exception")
-                           << LOG_KV("error", boost::diagnostic_information(e));
+                           << LOG_KV("message", boost::diagnostic_information(e));
     }
 }

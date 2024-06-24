@@ -15,20 +15,35 @@ LOG_INFO() {
 download_console()
 {
     cd ${current_path}
-
+    
     LOG_INFO "Pull console, branch: ${console_branch} ..."
     console_file=console
     if [ -d ${console_file} ] && [ -d "${console_file}/.git" ]; then
         LOG_INFO "Use download cache"
         cd ${console_file}
-        git fetch --unshallow
+        git fetch --all
         rm -rf build log dist
         git reset --hard
-        git checkout ${console_branch}
-        git pull
+        # check if console_branch exists
+        if [ -n "$(git branch -a | grep origin/${console_branch})" ]; then
+            git checkout origin/${console_branch}
+        else
+            git checkout origin/master
+        fi
+        if [ $? -ne 0 ]; then
+            cd ..
+            rm -rf ${console_file}
+            git clone https://github.com/FISCO-BCOS/console.git
+        fi
     else
         rm -rf ${console_file}
-        git clone -b ${console_branch} --depth 5  https://ghproxy.com/github.com/FISCO-BCOS/console.git
+        git clone https://github.com/FISCO-BCOS/console.git
+        cd console
+        if [ -n "$(git branch -a | grep origin/${console_branch})" ]; then
+            git checkout origin/${console_branch}
+        else
+            git checkout origin/master
+        fi
     fi
 }
 
@@ -46,10 +61,10 @@ config_console()
     cp ./src/integration-test/resources/config-example.toml ./src/integration-test/resources/config.toml
     ${sed_cmd} "s/peers=\[\"127.0.0.1:20200\", \"127.0.0.1:20201\"\]/peers=\[\"127.0.0.1:20201\"\]/g" ./src/integration-test/resources/config.toml
     cp -r ./src/main/resources/contract ./contracts
-
+    
     local not_use_sm="true"
     if [ "${use_sm}" == "true" ]; then
-      not_use_sm="false"
+        not_use_sm="false"
     fi
     use_sm_str="useSMCrypto = \"${use_sm}\""
     ${sed_cmd} "s/useSMCrypto = \"${not_use_sm}\"/${use_sm_str}/g" ./src/integration-test/resources/config.toml
@@ -69,9 +84,9 @@ console_integrationTest()
 }
 
 if [ $# != 3 ]; then
-  echo "USAGE: ${0} console_branch is_sm node_path"
-  echo " e.g.: ${0} master true ./nodes"
-  exit 1;
+    echo "USAGE: ${0} console_branch is_sm node_path"
+    echo " e.g.: ${0} master true ./nodes"
+    exit 1;
 fi
 
 console_branch="${1}"

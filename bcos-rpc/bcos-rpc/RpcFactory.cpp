@@ -54,16 +54,16 @@ using namespace bcos::boostssl::ws;
 using namespace bcos::protocol;
 using namespace bcos::security;
 
-RpcFactory::RpcFactory(std::string const& _chainID, GatewayInterface::Ptr _gatewayInterface,
+RpcFactory::RpcFactory(std::string _chainID, GatewayInterface::Ptr _gatewayInterface,
     KeyFactory::Ptr _keyFactory, bcos::security::DataEncryptInterface::Ptr _dataEncrypt)
-  : m_chainID(_chainID),
-    m_gateway(_gatewayInterface),
-    m_keyFactory(_keyFactory),
-    m_dataEncrypt(_dataEncrypt)
+  : m_chainID(std::move(_chainID)),
+    m_gateway(std::move(_gatewayInterface)),
+    m_keyFactory(std::move(_keyFactory)),
+    m_dataEncrypt(std::move(_dataEncrypt))
 {}
 
 std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
-    bcos::tool::NodeConfig::Ptr _nodeConfig)
+    const bcos::tool::NodeConfig::Ptr& _nodeConfig)
 {
     auto wsConfig = std::make_shared<boostssl::ws::WsConfig>();
     wsConfig->setModel(bcos::boostssl::ws::WsModel::Server);
@@ -90,7 +90,7 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         std::shared_ptr<bytes> keyContent;
 
         // caCert
-        if (false == _nodeConfig->caCert().empty())
+        if (!_nodeConfig->caCert().empty())
         {
             try
             {
@@ -112,7 +112,7 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         }
 
         // nodeCert
-        if (false == _nodeConfig->nodeCert().empty())
+        if (!_nodeConfig->nodeCert().empty())
         {
             try
             {
@@ -134,14 +134,18 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         }
 
         // nodeKey
-        if (false == _nodeConfig->nodeKey().empty())
+        if (!_nodeConfig->nodeKey().empty())
         {
             try
             {
-                if (nullptr == m_dataEncrypt)  // storage_security.enable = false
+                if (nullptr == m_dataEncrypt) [[likely]]  // storage_security.enable = false
+                {
                     keyContent = readContents(boost::filesystem::path(_nodeConfig->nodeKey()));
+                }
                 else
+                {
                     keyContent = m_dataEncrypt->decryptFile(_nodeConfig->nodeKey());
+                }
             }
             catch (std::exception& e)
             {
@@ -176,7 +180,7 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         std::shared_ptr<bytes> keyContent;
 
         // caCert
-        if (false == _nodeConfig->smCaCert().empty())
+        if (!_nodeConfig->smCaCert().empty())
         {
             try
             {
@@ -198,7 +202,7 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         }
 
         // nodeCert
-        if (false == _nodeConfig->smNodeCert().empty())
+        if (!_nodeConfig->smNodeCert().empty())
         {
             try
             {
@@ -220,14 +224,18 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         }
 
         // nodeKey
-        if (false == _nodeConfig->smNodeKey().empty())
+        if (!_nodeConfig->smNodeKey().empty())
         {
             try
             {
                 if (nullptr == m_dataEncrypt)  // storage_security.enable = false
+                {
                     keyContent = readContents(boost::filesystem::path(_nodeConfig->smNodeKey()));
+                }
                 else
+                {
                     keyContent = m_dataEncrypt->decryptFile(_nodeConfig->smNodeKey());
+                }
             }
             catch (std::exception& e)
             {
@@ -242,7 +250,7 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         memcpy(certConfig.nodeKey.data(), keyContent->data(), keyContent->size());
 
         // enNodeCert
-        if (false == _nodeConfig->enSmNodeCert().empty())
+        if (!_nodeConfig->enSmNodeCert().empty())
         {
             try
             {
@@ -264,14 +272,18 @@ std::shared_ptr<bcos::boostssl::ws::WsConfig> RpcFactory::initConfig(
         }
 
         // enNodeKey
-        if (false == _nodeConfig->enSmNodeKey().empty())
+        if (!_nodeConfig->enSmNodeKey().empty())
         {
             try
             {
                 if (nullptr == m_dataEncrypt)  // storage_security.enable = false
+                {
                     keyContent = readContents(boost::filesystem::path(_nodeConfig->enSmNodeKey()));
+                }
                 else
+                {
                     keyContent = m_dataEncrypt->decryptFile(_nodeConfig->enSmNodeKey());
+                }
             }
             catch (std::exception& e)
             {
@@ -313,7 +325,7 @@ bcos::boostssl::ws::WsService::Ptr RpcFactory::buildWsService(
     auto wsService = std::make_shared<bcos::boostssl::ws::WsService>();
     auto initializer = std::make_shared<bcos::boostssl::ws::WsInitializer>();
 
-    initializer->setConfig(_config);
+    initializer->setConfig(std::move(_config));
     initializer->initWsService(wsService);
     wsService->setModuleName("RPC");
 
@@ -321,7 +333,7 @@ bcos::boostssl::ws::WsService::Ptr RpcFactory::buildWsService(
 }
 
 bcos::rpc::JsonRpcImpl_2_0::Ptr RpcFactory::buildJsonRpc(int sendTxTimeout,
-    std::shared_ptr<boostssl::ws::WsService> _wsService, GroupManager::Ptr _groupManager)
+    const std::shared_ptr<boostssl::ws::WsService>& _wsService, GroupManager::Ptr _groupManager)
 {
     // JsonRpcImpl_2_0
     //*
@@ -338,13 +350,13 @@ bcos::rpc::JsonRpcImpl_2_0::Ptr RpcFactory::buildJsonRpc(int sendTxTimeout,
 }
 
 bcos::event::EventSub::Ptr RpcFactory::buildEventSub(
-    std::shared_ptr<boostssl::ws::WsService> _wsService, GroupManager::Ptr _groupManager)
+    const std::shared_ptr<boostssl::ws::WsService>& _wsService, GroupManager::Ptr _groupManager)
 {
     auto eventSubFactory = std::make_shared<event::EventSubFactory>();
     auto eventSub = eventSubFactory->buildEventSub(_wsService);
 
     auto matcher = std::make_shared<event::EventSubMatcher>();
-    eventSub->setGroupManager(_groupManager);
+    eventSub->setGroupManager(std::move(_groupManager));
     eventSub->setMessageFactory(_wsService->messageFactory());
     eventSub->setMatcher(matcher);
     RPC_LOG(INFO) << LOG_DESC("create event sub obj");
@@ -356,7 +368,7 @@ Rpc::Ptr RpcFactory::buildRpc(std::string const& _gatewayServiceName,
 {
     auto config = initConfig(m_nodeConfig);
     auto wsService = buildWsService(config);
-    auto groupManager = buildGroupManager(_rpcServiceName, _entryPoint);
+    auto groupManager = buildGroupManager(_rpcServiceName, std::move(_entryPoint));
     auto amopClient = buildAMOPClient(wsService, _gatewayServiceName);
 
     RPC_LOG(INFO) << LOG_KV("listenIP", config->listenIP())

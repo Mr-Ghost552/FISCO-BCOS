@@ -1,8 +1,8 @@
+#include "ParallelMerkleProof.h"
 #include "bcos-crypto/interfaces/crypto/CryptoSuite.h"
 #include <bcos-crypto/hash/SM3.h>
 #include <bcos-crypto/hasher/OpenSSLHasher.h>
 #include <bcos-crypto/merkle/Merkle.h>
-#include <bcos-protocol/ParallelMerkleProof.h>
 #include <bcos-utilities/FixedBytes.h>
 #include <tbb/blocked_range.h>
 #include <tbb/enumerable_thread_specific.h>
@@ -52,7 +52,7 @@ void testNewMerkle(const std::vector<bcos::bytes>& datas)
     auto timePoint = std::chrono::high_resolution_clock::now();
     std::vector<bcos::bytes> out;
 
-    bcos::crypto::merkle::Merkle<Hasher, 16> merkle;
+    bcos::crypto::merkle::Merkle<Hasher, 16> merkle(Hasher{});
     merkle.generateMerkle(datas, out);
 
     auto root = *(out.rbegin());

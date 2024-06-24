@@ -16,7 +16,9 @@
 #include <boost/throw_exception.hpp>
 #include <algorithm>
 #include <limits>
+#include <regex>
 #include <string>
+#include <vector>
 
 using namespace bcos;
 using namespace security;
@@ -44,20 +46,46 @@ int64_t GatewayConfig::doubleMBToBit(double _d)
     return (int64_t)_d;
 }
 
+bool GatewayConfig::isIPAddress(const std::string& _input)
+{
+    const std::regex ipv4_regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}$");
+    const std::regex ipv6_regex(
+        "^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|:|((([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?::("
+        "([0-9a-fA-F]{1,4}:){0,6}[0-9a-fA-F]{1,4})?))$");
+
+    return std::regex_match(_input, ipv4_regex) || std::regex_match(_input, ipv6_regex);
+}
+
+bool GatewayConfig::isHostname(const std::string& _input)
+{
+    boost::asio::io_context io_context;
+    boost::asio::ip::tcp::resolver resolver(io_context);
+
+    try
+    {
+        boost::asio::ip::tcp::resolver::results_type results = resolver.resolve(_input, "80");
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        return false;
+    }
+}
+
 void GatewayConfig::hostAndPort2Endpoint(const std::string& _host, NodeIPEndpoint& _endpoint)
 {
     std::string ip;
-    uint16_t port;
+    uint16_t port = 0;
 
-    std::vector<std::string> s;
-    boost::split(s, _host, boost::is_any_of("]"), boost::token_compress_on);
-    if (s.size() == 2)
-    {  // ipv6
-        ip = s[0].data() + 1;
-        port = boost::lexical_cast<int>(s[1].data() + 1);
+    std::vector<std::string> result;
+    boost::split(result, _host, boost::is_any_of("]"), boost::token_compress_on);
+    if (result.size() == 2)
+    {  // ipv6 format is [IP]:Port
+        ip = result[0].substr(1);
+        port = boost::lexical_cast<int>(result[1].substr(1));
     }
-    else if (s.size() == 1)
-    {  // ipv4
+    else if (result.size() == 1)
+    {  // ipv4 format is IP:Port
         std::vector<std::string> v;
         boost::split(v, _host, boost::is_any_of(":"), boost::token_compress_on);
         if (v.size() < 2)
@@ -84,10 +112,42 @@ void GatewayConfig::hostAndPort2Endpoint(const std::string& _host, NodeIPEndpoin
     }
 
     boost::system::error_code ec;
-    boost::asio::ip::address ip_address = boost::asio::ip::make_address(ip, ec);
+    boost::asio::ip::address ip_address;
+    // ip
+    if (isIPAddress(ip))
+    {
+        ip_address = boost::asio::ip::make_address(ip, ec);
+    }
+    // hostname
+    else if (isHostname(ip))
+    {
+        boost::asio::io_context io_context;
+        boost::asio::ip::tcp::resolver resolver(io_context);
+        boost::asio::ip::tcp::resolver::query query(boost::asio::ip::tcp::v4(), ip, "80");
+        boost::asio::ip::tcp::resolver::results_type results = resolver.resolve(query, ec);
+        if (!ec)
+        {
+            ip_address = results.begin()->endpoint().address();
+        }
+        else
+        {
+            GATEWAY_CONFIG_LOG(ERROR)
+                << LOG_DESC("parse host name failed") << LOG_KV("host name", ip);
+            BOOST_THROW_EXCEPTION(InvalidParameter() << errinfo_comment(
+                                      "GatewayConfig: parse host name failed, host name=" + ip));
+        }
+    }
+    else
+    {
+        GATEWAY_CONFIG_LOG(ERROR) << "the host is not a valid ip or a hostname"
+                                  << LOG_KV("host:", _host);
+        BOOST_THROW_EXCEPTION(
+            InvalidParameter() << errinfo_comment(
+                "GatewayConfig: the host is not a valid ip or a hostname, host=" + _host));
+    }
     if (ec.value() != 0)
     {
-        GATEWAY_CONFIG_LOG(ERROR) << LOG_DESC("the host is invalid, make_address error")
+        GATEWAY_CONFIG_LOG(ERROR) << LOG_DESC("the host is invalid, make_address failed")
                                   << LOG_KV("host", _host);
         BOOST_THROW_EXCEPTION(
             InvalidParameter() << errinfo_comment(
@@ -177,7 +237,7 @@ void GatewayConfig::initConfig(std::string const& _configPath, bool _uuidRequire
 
         BOOST_THROW_EXCEPTION(
             InvalidParameter() << errinfo_comment("initConfig: currentPath:" + full_path.string() +
-                                                  " ,error:" + boost::diagnostic_information(e)));
+                                                  " ,message:" + boost::diagnostic_information(e)));
     }
 
     GATEWAY_CONFIG_LOG(INFO) << LOG_DESC("initConfig ok!") << LOG_KV("configPath", _configPath)
@@ -201,6 +261,7 @@ void GatewayConfig::initP2PConfig(const boost::property_tree::ptree& _pt, bool _
       listen_port=30300
       nodes_path=./
       nodes_file=nodes.json
+      readonly=false
 
       enable_rip_protocol=true
       allow_max_msg_size=
@@ -233,7 +294,7 @@ void GatewayConfig::initP2PConfig(const boost::property_tree::ptree& _pt, bool _
     }
 
     m_nodeFileName = _pt.get<std::string>("p2p.nodes_file", "nodes.json");
-
+    m_readonly = _pt.get<bool>("p2p.readonly", false);
     m_enableRIPProtocol = _pt.get<bool>("p2p.enable_rip_protocol", true);
 
     m_enableCompress = _pt.get<bool>("p2p.enable_compression", true);
@@ -281,7 +342,8 @@ void GatewayConfig::initP2PConfig(const boost::property_tree::ptree& _pt, bool _
                              << LOG_KV("p2p.session_max_send_msg_count", m_maxSendMsgCount)
                              << LOG_KV("p2p.thread_count", m_threadPoolSize)
                              << LOG_KV("p2p.nodes_path", m_nodePath)
-                             << LOG_KV("p2p.nodes_file", m_nodeFileName);
+                             << LOG_KV("p2p.nodes_file", m_nodeFileName)
+                             << LOG_KV("p2p.readonly", m_readonly);
 }
 
 // load p2p connected peers
@@ -415,6 +477,17 @@ void GatewayConfig::initSMCertConfig(const boost::property_tree::ptree& _pt)
                              << LOG_KV("multi_ca_path", smCertConfig.multiCaPath);
 }
 
+inline void mustNoLessThan(const std::string& _configName, int32_t _value, int32_t _min)
+{
+    // check and throw
+    if (_value < _min)
+    {
+        BOOST_THROW_EXCEPTION(InvalidParameter() << errinfo_comment(
+                                  "The value of " + _configName + " must no less than " +
+                                  std::to_string(_min) + " current is" + std::to_string(_value)));
+    }
+}
+
 // loads rate limit configuration items from the configuration file
 void GatewayConfig::initFlowControlConfig(const boost::property_tree::ptree& _pt)
 {
@@ -433,6 +506,7 @@ void GatewayConfig::initFlowControlConfig(const boost::property_tree::ptree& _pt
      */
     // time_window_sec=1
     int32_t timeWindowSec = _pt.get<int32_t>("flow_control.time_window_sec", 1);
+    mustNoLessThan("time_window_sec", timeWindowSec, 0);
 
     // enable_distributed_ratelimit=false
     bool enableDistributedRatelimit =
@@ -443,8 +517,12 @@ void GatewayConfig::initFlowControlConfig(const boost::property_tree::ptree& _pt
     // enable_distributed_ratelimit=false
     int32_t distributedRateLimitCachePercent =
         _pt.get<int32_t>("flow_control.distributed_ratelimit_cache_percent", 20);
+    mustNoLessThan("distributed_ratelimit_cache_percent", distributedRateLimitCachePercent, 0);
+
     // stat_reporter_interval=60000
     int32_t statInterval = _pt.get<int32_t>("flow_control.stat_reporter_interval", 60000);
+    mustNoLessThan("stat_reporter_interval", statInterval, 0);
+
     // stat_reporter_interval=60000
     bool enableConnectDebugInfo = _pt.get<bool>("flow_control.enable_connect_debug_info", false);
 
@@ -455,9 +533,11 @@ void GatewayConfig::initFlowControlConfig(const boost::property_tree::ptree& _pt
     m_rateLimiterConfig.timeWindowSec = timeWindowSec;
     m_rateLimiterConfig.statInterval = statInterval;
     m_rateLimiterConfig.enableConnectDebugInfo = enableConnectDebugInfo;
+    m_rateLimiterConfig.enable = _pt.get<bool>("flow_control.enable", false);
 
     GATEWAY_CONFIG_LOG(INFO) << LOG_BADGE("initFlowControlConfig")
                              << LOG_DESC("load flow_control common config items")
+                             << LOG_KV("enable", m_rateLimiterConfig.enable)
                              << LOG_KV("flow_control.stat_reporter_interval",
                                     m_rateLimiterConfig.statInterval)
                              << LOG_KV("flow_control.enable_connect_debug_info",
@@ -740,8 +820,12 @@ void GatewayConfig::initFlowControlConfig(const boost::property_tree::ptree& _pt
     // incoming_p2p_basic_msg_type_qps_limit = -1
     int32_t p2pBasicMsgQPS =
         _pt.get<int32_t>("flow_control.incoming_p2p_basic_msg_type_qps_limit", -1);
+    mustNoLessThan("flow_control.incoming_p2p_basic_msg_type_qps_limit", p2pBasicMsgQPS, -1);
+
     // incoming_module_msg_type_qps_limit = -1
     int32_t moduleMsgQPS = _pt.get<int32_t>("flow_control.incoming_module_msg_type_qps_limit", -1);
+    mustNoLessThan("flow_control.incoming_module_msg_type_qps_limit", moduleMsgQPS, -1);
+
     // module id => qps
     if (_pt.get_child_optional("flow_control"))
     {
@@ -768,10 +852,16 @@ void GatewayConfig::initFlowControlConfig(const boost::property_tree::ptree& _pt
                                              << LOG_KV("key", "flow_control." + key)
                                              << LOG_KV("module", module) << LOG_KV("qps", qps);
                 }
+                else
+                {
+                    BOOST_THROW_EXCEPTION(InvalidParameter() << errinfo_comment(
+                                              "flow_control.key should greater than 0"));
+                }
             }
         }
     }
 
+    GATEWAY_CONFIG_LOG(INFO) << "rateLimiter: " << m_rateLimiterConfig.enable;
 
     m_rateLimiterConfig.p2pBasicMsgQPS = p2pBasicMsgQPS;
     m_rateLimiterConfig.p2pModuleMsgQPS = moduleMsgQPS;
@@ -894,8 +984,9 @@ void GatewayConfig::initPeerBlacklistConfig(const boost::property_tree::ptree& _
         certBlacklistSection = "certificate_blacklist";
     }
 
-    bool enableBlacklist{false};
     // CRL means certificate rejected list, CRL optional in config.ini
+    bool enableBlacklist{false};
+    std::set<std::string> certBlacklist;
     if (_pt.get_child_optional(certBlacklistSection))
     {
         for (auto it : _pt.get_child(certBlacklistSection))
@@ -912,8 +1003,8 @@ void GatewayConfig::initPeerBlacklistConfig(const boost::property_tree::ptree& _
                         (false == m_smSSL ? isNodeIDOk<h2048>(nodeID) : isNodeIDOk<h512>(nodeID));
                     if (true == isNodeIDValid)
                     {
-                        m_enableBlacklist = true;
-                        m_certBlacklist.emplace(std::move(nodeID));
+                        enableBlacklist = true;
+                        certBlacklist.emplace(std::move(nodeID));
                     }
                     else
                     {
@@ -932,6 +1023,11 @@ void GatewayConfig::initPeerBlacklistConfig(const boost::property_tree::ptree& _
             }
         }
     }
+
+    bcos::Guard l(x_certBlacklist);
+
+    m_enableBlacklist = enableBlacklist;
+    m_certBlacklist.swap(certBlacklist);
 }
 
 void GatewayConfig::initPeerWhitelistConfig(const boost::property_tree::ptree& _pt)
@@ -942,7 +1038,8 @@ void GatewayConfig::initPeerWhitelistConfig(const boost::property_tree::ptree& _
         certWhitelistSection = "certificate_whitelist";
     }
 
-    bool enableWhiteList{false};
+    bool enableWhitelist{false};
+    std::set<std::string> certWhitelist;
     // CAL means certificate accepted list, CAL optional in config.ini
     if (_pt.get_child_optional(certWhitelistSection))
     {
@@ -960,8 +1057,8 @@ void GatewayConfig::initPeerWhitelistConfig(const boost::property_tree::ptree& _
                         (false == m_smSSL ? isNodeIDOk<h2048>(nodeID) : isNodeIDOk<h512>(nodeID));
                     if (true == isNodeIDValid)
                     {
-                        m_enableWhitelist = true;
-                        m_certWhitelist.emplace(std::move(nodeID));
+                        enableWhitelist = true;
+                        certWhitelist.emplace(std::move(nodeID));
                     }
                     else
                     {
@@ -980,6 +1077,11 @@ void GatewayConfig::initPeerWhitelistConfig(const boost::property_tree::ptree& _
             }
         }
     }
+
+    bcos::Guard l(x_certWhitelist);
+
+    m_enableWhitelist = enableWhitelist;
+    m_certWhitelist.swap(certWhitelist);
 }
 
 void GatewayConfig::checkFileExist(const std::string& _path)
@@ -992,4 +1094,20 @@ void GatewayConfig::checkFileExist(const std::string& _path)
                                                   " maybe file not exist, path: " +
                                                   _path));
     }
+}
+
+void GatewayConfig::loadPeerBlacklist()
+{
+    boost::property_tree::ptree pt;
+    boost::property_tree::ini_parser::read_ini(m_configFile, pt);
+
+    initPeerBlacklistConfig(pt);
+}
+
+void GatewayConfig::loadPeerWhitelist()
+{
+    boost::property_tree::ptree pt;
+    boost::property_tree::ini_parser::read_ini(m_configFile, pt);
+
+    initPeerWhitelistConfig(pt);
 }

@@ -62,13 +62,13 @@ public:
                               << LOG_KV("authAdminAddress", _nodeConfig->authAdminAddress());
 
         // bytes code + abi encode constructor params
-        codec::abi::ContractABICodec abi(_protocol->cryptoSuite()->hashImpl());
+        codec::abi::ContractABICodec abi(*_protocol->cryptoSuite()->hashImpl());
         bytes input = code + abi.abiIn("", initGovernors, weights, codec::toString32(h256(0)),
                                  codec::toString32(h256(0)));
 
-        auto tx = _protocol->blockFactory()->transactionFactory()->createTransaction(3,
-            precompiled::AUTH_COMMITTEE_ADDRESS, input, u256(_number).str(), 500, _nodeConfig->chainId(),
-            _nodeConfig->groupId(), utcTime());
+        auto tx = _protocol->blockFactory()->transactionFactory()->createTransaction(0,
+            precompiled::AUTH_COMMITTEE_ADDRESS, input, u256(_number).str(), 500,
+            _nodeConfig->chainId(), _nodeConfig->groupId(), utcTime());
         tx->forceSender(authAdmin.asBytes());
         block->appendTransaction(tx);
     }

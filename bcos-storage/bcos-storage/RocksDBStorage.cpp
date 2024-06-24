@@ -127,7 +127,7 @@ void RocksDBStorage::asyncGetRow(std::string_view _table, std::string_view _key,
                 "RocksDB get failed!, " + boost::lexical_cast<std::string>(status.ToString());
             STORAGE_ROCKSDB_LOG(WARNING)
                 << LOG_DESC("asyncGetRow failed") << LOG_KV("table", _table) << LOG_KV("key", _key)
-                << LOG_KV("error", errorMessage);
+                << LOG_KV("message", errorMessage);
             if (status.getState() != nullptr)
             {
                 errorMessage.append(" ").append(status.getState());
@@ -218,12 +218,12 @@ void RocksDBStorage::asyncGetRows(std::string_view _table,
                         else if (status.getState() != nullptr)
                         {
                             STORAGE_ROCKSDB_LOG(WARNING)
-                                << "Multi get rows error: " << status.getState();
+                                << "Multi get rows failed: " << status.getState();
                         }
                         else
                         {
                             STORAGE_ROCKSDB_LOG(WARNING)
-                                << "Multi get rows error:" << status.ToString();
+                                << "Multi get rows failed:" << status.ToString();
                         }
                     }
                 }
@@ -299,7 +299,7 @@ void RocksDBStorage::asyncSetRow(std::string_view _table, std::string_view _key,
 void RocksDBStorage::asyncPrepare(const TwoPCParams& param, const TraverseStorageInterface& storage,
     std::function<void(Error::Ptr, uint64_t startTS, const std::string&)> callback)
 {
-    __itt_task_begin(ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
+    __itt_task_begin(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
         const_cast<__itt_string_handle*>(ITT_STRING_STORAGE_PREPARE));
     std::ignore = param;
     try
@@ -419,13 +419,13 @@ void RocksDBStorage::asyncPrepare(const TwoPCParams& param, const TraverseStorag
     {
         callback(BCOS_ERROR_WITH_PREV_UNIQUE_PTR(UnknownEntryType, "Prepare failed! ", e), 0, "");
     }
-    __itt_task_end(ITT_DOMAIN_STORAGE);
+    __itt_task_end(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE);
 }
 
 void RocksDBStorage::asyncCommit(
     const TwoPCParams& params, std::function<void(Error::Ptr, uint64_t)> callback)
 {
-    __itt_task_begin(ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
+    __itt_task_begin(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
         const_cast<__itt_string_handle*>(ITT_STRING_STORAGE_COMMIT));
 
     size_t count = 0;
@@ -454,7 +454,7 @@ void RocksDBStorage::asyncCommit(
         }
     }
     auto end = utcSteadyTime();
-    __itt_task_end(ITT_DOMAIN_STORAGE);
+    __itt_task_end(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE);
     callback(nullptr, 0);
     STORAGE_ROCKSDB_LOG(INFO) << LOG_DESC("asyncCommit finished")
                               << LOG_KV("blockNumber", params.number)
@@ -472,10 +472,10 @@ void RocksDBStorage::asyncCommit(
         m_db->GetProperty("rocksdb.cur-size-all-mem-tables", &current);
         STORAGE_ROCKSDB_LOG(INFO) << LOG_DESC("RocksDB statistics")
                                   << LOG_KV("blockNumber", params.number)
-                                  << LOG_KV(
-                                         "block_cache_usage", tableOptions->block_cache->GetUsage())
-                                  << LOG_KV("block_cache_pinned_usage",
-                                         tableOptions->block_cache->GetPinnedUsage())
+                                //   << LOG_KV(
+                                //          "block_cache_usage", tableOptions->block_cache->GetUsage())
+                                //   << LOG_KV("block_cache_pinned_usage",
+                                //          tableOptions->block_cache->GetPinnedUsage())
                                   << LOG_KV("estimate-table-readers-mem", out)
                                   << LOG_KV("cur-size-all-mem-tables", current);
     }
@@ -484,7 +484,7 @@ void RocksDBStorage::asyncCommit(
 void RocksDBStorage::asyncRollback(
     const TwoPCParams& params, std::function<void(Error::Ptr)> callback)
 {
-    __itt_task_begin(ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
+    __itt_task_begin(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
         const_cast<__itt_string_handle*>(ITT_STRING_STORAGE_COMMIT));
 
     auto start = utcSteadyTime();
@@ -495,7 +495,7 @@ void RocksDBStorage::asyncRollback(
         m_writeBatch = nullptr;
     }
     auto end = utcSteadyTime();
-    __itt_task_end(ITT_DOMAIN_STORAGE);
+    __itt_task_end(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE);
 
     callback(nullptr);
     STORAGE_ROCKSDB_LOG(INFO) << LOG_DESC("asyncRollback") << LOG_KV("blockNumber", params.number)
@@ -504,83 +504,79 @@ void RocksDBStorage::asyncRollback(
                               << LOG_KV("callback time(ms)", utcSteadyTime() - end);
 }
 
-bcos::Error::Ptr RocksDBStorage::setRows(std::string_view table,
-    const std::variant<const gsl::span<std::string_view const>, const gsl::span<std::string const>>&
-        _keys,
-    std::variant<gsl::span<std::string_view const>, gsl::span<std::string const>> _values) noexcept
+bcos::Error::Ptr RocksDBStorage::setRows(std::string_view tableName,
+    RANGES::any_view<std::string_view, RANGES::category::random_access | RANGES::category::sized>
+        keys,
+    RANGES::any_view<std::string_view, RANGES::category::random_access | RANGES::category::sized>
+        values) noexcept
 {
-    __itt_task_begin(ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
+    __itt_task_begin(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE, __itt_null, __itt_null,
         const_cast<__itt_string_handle*>(ITT_STRING_STORAGE_SET_ROWS));
     bcos::Error::Ptr err = nullptr;
-    std::visit(
-        [&](auto&& keys, auto&& values) {
-            auto start = utcSteadyTime();
-            if (table.empty())
-            {
-                STORAGE_ROCKSDB_LOG(WARNING)
-                    << LOG_DESC("setRows empty tableName") << LOG_KV("table", table);
-                err = BCOS_ERROR_PTR(TableNotExists, "empty tableName");
-                return;
-            }
-            if (keys.size() != values.size())
-            {
-                STORAGE_ROCKSDB_LOG(WARNING)
-                    << LOG_DESC("setRows values size mismatch keys size")
-                    << LOG_KV("keys", keys.size()) << LOG_KV("values", values.size());
-                err = BCOS_ERROR_PTR(TableNotExists, "setRows values size mismatch keys size");
-                return;
-            }
-            if (keys.empty())
-            {
-                STORAGE_ROCKSDB_LOG(WARNING)
-                    << LOG_DESC("setRows empty keys") << LOG_KV("table", table);
-                return;
-            }
-            std::vector<std::string> realKeys(keys.size());
+    auto start = utcSteadyTime();
+    if (tableName.empty())
+    {
+        STORAGE_ROCKSDB_LOG(WARNING)
+            << LOG_DESC("setRows empty tableName") << LOG_KV("table", tableName);
+        err = BCOS_ERROR_PTR(TableNotExists, "empty tableName");
+        return err;
+    }
+    if (keys.size() != values.size())
+    {
+        STORAGE_ROCKSDB_LOG(WARNING)
+            << LOG_DESC("setRows values size mismatch keys size") << LOG_KV("keys", keys.size())
+            << LOG_KV("values", values.size());
+        err = BCOS_ERROR_PTR(TableNotExists, "setRows values size mismatch keys size");
+        return err;
+    }
+    if (keys.empty())
+    {
+        STORAGE_ROCKSDB_LOG(WARNING)
+            << LOG_DESC("setRows empty keys") << LOG_KV("table", tableName);
+        return err;
+    }
+    std::vector<std::string> realKeys(keys.size());
 
-            std::vector<std::string> encryptedValues;
-            if (m_dataEncryption)
-            {
-                encryptedValues.resize(values.size());
-            }
+    std::vector<std::string> encryptedValues;
+    if (m_dataEncryption)
+    {
+        encryptedValues.resize(values.size());
+    }
 
-            tbb::parallel_for(tbb::blocked_range<size_t>(0, keys.size(), 256),
-                [&](const tbb::blocked_range<size_t>& range) {
-                    for (size_t i = range.begin(); i != range.end(); ++i)
-                    {
-                        realKeys[i] = toDBKey(table, keys[i]);
-                        if (m_dataEncryption)
-                        {
-                            encryptedValues[i] =
-                                m_dataEncryption->encrypt(std::string(std::move(values[i])));
-                        }
-                    }
-                });
-            auto writeBatch = WriteBatch();
-            size_t dataSize = 0;
-            for (size_t i = 0; i < keys.size(); ++i)
+    tbb::parallel_for(tbb::blocked_range<size_t>(0, keys.size(), 256),
+        [&](const tbb::blocked_range<size_t>& range) {
+            for (size_t i = range.begin(); i != range.end(); ++i)
             {
-                // Storage Security
+                realKeys[i] = toDBKey(tableName, keys[i]);
                 if (m_dataEncryption)
                 {
-                    dataSize += realKeys[i].size() + encryptedValues[i].size();
-                    writeBatch.Put(realKeys[i], encryptedValues[i]);
-                }
-                else
-                {
-                    dataSize += realKeys[i].size() + values[i].size();
-                    writeBatch.Put(std::move(realKeys[i]), std::move(values[i]));
+                    encryptedValues[i] = m_dataEncryption->encrypt(std::string(values[i]));
                 }
             }
-            WriteOptions options;
-            auto status = m_db->Write(options, &writeBatch);
-            err = checkStatus(status);
-            STORAGE_ROCKSDB_LOG(INFO)
-                << LOG_DESC("setRows finished") << LOG_KV("put", keys.size())
-                << LOG_KV("dataSize", dataSize) << LOG_KV("time(ms)", utcSteadyTime() - start);
-        },
-        _keys, _values);
-    __itt_task_end(ITT_DOMAIN_STORAGE);
+        });
+    auto writeBatch = WriteBatch();
+    size_t dataSize = 0;
+    for (size_t i = 0; i < keys.size(); ++i)
+    {
+        // Storage Security
+        if (m_dataEncryption)
+        {
+            dataSize += realKeys[i].size() + encryptedValues[i].size();
+            writeBatch.Put(realKeys[i], encryptedValues[i]);
+        }
+        else
+        {
+            dataSize += realKeys[i].size() + values[i].size();
+            writeBatch.Put(realKeys[i], values[i]);
+        }
+    }
+    WriteOptions options;
+    auto status = m_db->Write(options, &writeBatch);
+    err = checkStatus(status);
+    STORAGE_ROCKSDB_LOG(INFO) << LOG_DESC("setRows finished") << LOG_KV("put", keys.size())
+                              << LOG_KV("dataSize", dataSize)
+                              << LOG_KV("time(ms)", utcSteadyTime() - start);
+    __itt_task_end(ittapi::ITT_DOMAINS::instance().ITT_DOMAIN_STORAGE);
     return err;
 }
 

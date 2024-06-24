@@ -17,7 +17,6 @@
 #------------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.10)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "12" CACHE STRING "Minimum OS X deployment version")
 
 project(bcos-txpool VERSION ${VERSION})
 
@@ -38,7 +37,7 @@ endif()
 # buildDoc(bcos-txpool-doc)
 
 # for code coverage
-if (COVERAGE)
-    include(Coverage)
-    config_coverage("txpool-cov" "'/usr*' '${CMAKE_CURRENT_SOURCE_DIR}/bcos-cmake-scripts*' '${CMAKE_CURRENT_SOURCE_DIR}/test/bcos-test*'")
-endif ()
+#if (COVERAGE)
+#    include(Coverage)
+#    config_coverage("txpool-cov" "'/usr*' '${CMAKE_CURRENT_SOURCE_DIR}/bcos-cmake-scripts*' '${CMAKE_CURRENT_SOURCE_DIR}/test/bcos-test*'")
+#endif ()

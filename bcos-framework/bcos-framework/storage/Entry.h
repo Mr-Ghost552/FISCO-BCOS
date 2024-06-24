@@ -11,9 +11,7 @@
 #include <boost/iostreams/stream.hpp>
 #include <boost/throw_exception.hpp>
 #include <algorithm>
-#include <compare>
 #include <cstdint>
-#include <exception>
 #include <initializer_list>
 #include <type_traits>
 #include <variant>
@@ -51,6 +49,8 @@ public:
         std::shared_ptr<std::vector<unsigned char>>, std::shared_ptr<std::vector<char>>>;
 
     Entry() = default;
+    explicit Entry(auto input) { set(std::move(input)); }
+
     Entry(const Entry&) = default;
     Entry(Entry&&) noexcept = default;
     bcos::storage::Entry& operator=(const Entry&) = default;
@@ -81,22 +81,22 @@ public:
 
     template <typename In, typename OutputArchive = boost::archive::binary_oarchive,
         int flag = ARCHIVE_FLAG>
-    void setObject(const In& in)
+    void setObject(const In& input)
     {
         std::string value;
         boost::iostreams::stream<boost::iostreams::back_insert_device<std::string>> outputStream(
             value);
         OutputArchive archive(outputStream, flag);
 
-        archive << in;
+        archive << input;
         outputStream.flush();
 
         setField(0, std::move(value));
     }
 
-    std::string_view get() const { return outputValueView(m_value); }
+    std::string_view get() const& { return outputValueView(m_value); }
 
-    std::string_view getField(size_t index) const
+    std::string_view getField(size_t index) const&
     {
         if (index > 0)
         {
@@ -162,6 +162,13 @@ public:
 
         m_status = MODIFIED;
     }
+    template <EntryBufferInput T>
+    void set(std::shared_ptr<T> value)
+    {
+        m_size = value->size();
+        m_value = std::move(value);
+        m_status = MODIFIED;
+    }
 
     template <typename T>
     void setPointer(std::shared_ptr<T>&& value)
@@ -184,8 +191,6 @@ public:
 
     bool dirty() const { return (m_status == MODIFIED || m_status == DELETED); }
 
-    int32_t size() const { return m_size; }
-
     template <typename Input>
     void importFields(std::initializer_list<Input> values)
     {
@@ -204,56 +209,56 @@ public:
         return std::move(m_value);
     }
 
+    const char* data() const&
+    {
+        auto view = outputValueView(m_value);
+        return view.data();
+    }
+    int32_t size() const { return m_size; }
+
     bool valid() const { return m_status == Status::NORMAL; }
     crypto::HashType hash(std::string_view table, std::string_view key,
-        const bcos::crypto::Hash::Ptr& hashImpl, uint32_t blockVersion) const
+        const bcos::crypto::Hash& hashImpl, uint32_t blockVersion) const
     {
         bcos::crypto::HashType entryHash(0);
         if (blockVersion >= (uint32_t)bcos::protocol::BlockVersion::V3_1_VERSION)
         {
-            auto anyHasher = hashImpl->hasher();
+            auto hasher = hashImpl.hasher();
+            hasher.update(table);
+            hasher.update(key);
 
-            std::visit(
-                [this, &table, &key, &entryHash](auto& hasher) {
-                    hasher.update(table);
-                    hasher.update(key);
-
-                    switch (m_status)
-                    {
-                    case MODIFIED:
-                    {
-                        auto data = get();
-                        hasher.update(data);
-                        hasher.final(entryHash);
-                        if (c_fileLogLevel <= TRACE)
-                        {
-                            STORAGE_LOG(TRACE)
-                                << "Entry hash, dirty entry: " << table << " | " << toHex(key)
-                                << " | " << toHex(table) << toHex(key) << toHex(data)
-                                << LOG_KV("hash", entryHash.abridged());
-                        }
-                        break;
-                    }
-                    case DELETED:
-                    {
-                        hasher.final(entryHash);
-                        if (c_fileLogLevel <= TRACE)
-                        {
-                            STORAGE_LOG(TRACE)
-                                << "Entry hash, deleted entry: " << table << " | " << toHex(key)
-                                << LOG_KV("hash", entryHash.abridged());
-                        }
-                        break;
-                    }
-                    default:
-                    {
-                        STORAGE_LOG(DEBUG) << "Entry hash, clean entry: " << table << " | "
-                                           << toHex(key) << " | " << (int)m_status;
-                        break;
-                    }
-                    }
-                },
-                anyHasher);
+            switch (m_status)
+            {
+            case MODIFIED:
+            {
+                auto data = get();
+                hasher.update(data);
+                hasher.final(entryHash);
+                if (c_fileLogLevel == TRACE) [[unlikely]]
+                {
+                    STORAGE_LOG(TRACE)
+                        << "Entry hash, dirty entry: " << table << " | " << toHex(key) << " | "
+                        << toHex(data) << LOG_KV("hash", entryHash.abridged());
+                }
+                break;
+            }
+            case DELETED:
+            {
+                hasher.final(entryHash);
+                if (c_fileLogLevel == TRACE) [[unlikely]]
+                {
+                    STORAGE_LOG(TRACE) << "Entry hash, deleted entry: " << table << " | "
+                                       << toHex(key) << LOG_KV("hash", entryHash.abridged());
+                }
+                break;
+            }
+            default:
+            {
+                STORAGE_LOG(DEBUG) << "Entry hash, clean entry: " << table << " | " << toHex(key)
+                                   << " | " << (int)m_status;
+                break;
+            }
+            }
         }
         else
         {  // 3.0.0
@@ -261,8 +266,8 @@ public:
             {
                 auto value = get();
                 bcos::bytesConstRef ref((const bcos::byte*)value.data(), value.size());
-                entryHash = hashImpl->hash(ref);
-                if (c_fileLogLevel <= TRACE)
+                entryHash = hashImpl.hash(ref);
+                if (c_fileLogLevel == TRACE) [[unlikely]]
                 {
                     STORAGE_LOG(TRACE)
                         << "Entry Calc hash, dirty entry: " << table << " | " << toHex(key) << " | "
@@ -272,23 +277,18 @@ public:
             else if (m_status == Entry::DELETED)
             {
                 entryHash = bcos::crypto::HashType(0x1);
-                if (c_fileLogLevel <= TRACE)
+                if (c_fileLogLevel == TRACE) [[unlikely]]
                 {
                     STORAGE_LOG(TRACE) << "Entry Calc hash, deleted entry: " << table << " | "
                                        << toHex(key) << LOG_KV("hash", entryHash.abridged());
                 }
-            }
-            else
-            {
-                STORAGE_LOG(DEBUG) << "Entry Calc hash, clean entry: " << table << " | "
-                                   << toHex(key) << " | " << (int)m_status;
             }
         }
         return entryHash;
     }
 
 private:
-    [[nodiscard]] auto outputValueView(const ValueType& value) const -> std::string_view
+    [[nodiscard]] auto outputValueView(const ValueType& value) const& -> std::string_view
     {
         std::string_view view;
         std::visit(

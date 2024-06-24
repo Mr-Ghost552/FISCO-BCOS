@@ -25,7 +25,7 @@
 #include "bcos-tool/NodeConfig.h"
 #include "bcos-utilities/BoostLog.h"
 #include "bcos-utilities/Timer.h"
-#include "deps/src/wabt_project/src/result.h"
+
 #include "fisco-bcos-tars-service/Common/TarsUtils.h"
 #include <bcos-framework/protocol/ServiceDesc.h>
 #include <bcos-utilities/Worker.h>

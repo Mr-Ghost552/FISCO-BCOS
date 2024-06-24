@@ -51,11 +51,12 @@ public:
         const std::vector<std::string>& value, const std::string& callAddress, int _errorCode = 0,
         bool errorInTableManager = false)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         TableInfoTupleV320 tableInfoTuple = std::make_tuple(keyOrder, key, value);
         bytes in = codec->encodeWithSig(
             "createTable(string,(uint8,string,string[]))", tableName, tableInfoTuple);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(100), 10000, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(100), 10000, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -147,9 +148,10 @@ public:
     ExecutionMessage::UniquePtr appendColumns(protocol::BlockNumber _number,
         const std::string& tableName, const std::vector<std::string>& values, int _errorCode = 0)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in = codec->encodeWithSig("appendColumns(string,string[])", tableName, values);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(100), 10000, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(100), 10000, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -187,7 +189,8 @@ public:
         protocol::BlockNumber _number, std::string const& _path, int _errorCode = 0)
     {
         bytes in = codec->encodeWithSig("openTable(string)", _path);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -203,7 +206,7 @@ public:
         params2->setGasAvailable(gas);
         params2->setData(std::move(in));
         params2->setType(NativeExecutionMessage::TXHASH);
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
         executor->dmcExecuteTransaction(std::move(params2),
@@ -223,9 +226,10 @@ public:
 
     ExecutionMessage::UniquePtr desc(protocol::BlockNumber _number, std::string const& tableName)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in = codec->encodeWithSig("descWithKeyOrder(string)", tableName);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -258,10 +262,11 @@ public:
     ExecutionMessage::UniquePtr insert(protocol::BlockNumber _number, const std::string& key,
         const std::vector<std::string>& values, const std::string& callAddress)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         EntryTuple entryTuple = {key, values};
         bytes in = codec->encodeWithSig("insert((string,string[]))", entryTuple);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -313,9 +318,10 @@ public:
     ExecutionMessage::UniquePtr selectByKey(
         protocol::BlockNumber _number, const std::string& key, const std::string& callAddress)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in = codec->encodeWithSig("select(string)", key);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -368,10 +374,11 @@ public:
         const std::vector<ConditionTupleV320>& keyCond, const LimitTuple& limit,
         const std::string& callAddress)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in =
             codec->encodeWithSig("select((uint8,string,string)[],(uint32,uint32))", keyCond, limit);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -423,9 +430,10 @@ public:
     ExecutionMessage::UniquePtr count(protocol::BlockNumber _number,
         const std::vector<ConditionTupleV320>& keyCond, const std::string& callAddress)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in = codec->encodeWithSig("count((uint8,string,string)[])", keyCond);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -478,9 +486,10 @@ public:
         const std::vector<precompiled::UpdateFieldTuple>& _updateFields,
         const std::string& callAddress, bool _isErrorInTable = false)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in = codec->encodeWithSig("update(string,(string,string)[])", key, _updateFields);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -542,11 +551,12 @@ public:
         const std::vector<precompiled::UpdateFieldTuple>& _updateFields,
         const std::string& callAddress)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in = codec->encodeWithSig(
             "update((uint8,string,string)[],(uint32,uint32),(string,string)[])", conditions, _limit,
             _updateFields);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -605,9 +615,10 @@ public:
     ExecutionMessage::UniquePtr removeByKey(
         protocol::BlockNumber _number, const std::string& key, const std::string& callAddress)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in = codec->encodeWithSig("remove(string)", key);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -660,10 +671,11 @@ public:
         const std::vector<ConditionTupleV320>& keyCond, const LimitTuple& limit,
         const std::string& callAddress)
     {
-        nextBlock(_number, protocol::BlockVersion::V3_2_VERSION);
+        nextBlock(_number, protocol::BlockVersion::V3_6_1_VERSION);
         bytes in =
             codec->encodeWithSig("remove((uint8,string,string)[],(uint32,uint32))", keyCond, limit);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -714,6 +726,234 @@ public:
 
     std::string tableTestAddress;
     std::string sender;
+};
+
+struct ConditionNative
+{
+    ConditionNative() = default;
+    ~ConditionNative() = default;
+    void EQ(const std::string& value) { m_conditions.emplace_back(Comparator::EQ, value); }
+    void NE(const std::string& value) { m_conditions.emplace_back(Comparator::NE, value); }
+    // string compare, "2" > "12"
+    void GT(const std::string& value) { m_conditions.emplace_back(Comparator::GT, value); }
+    void GE(const std::string& value) { m_conditions.emplace_back(Comparator::GE, value); }
+    // string compare, "12" < "2"
+    void LT(const std::string& value) { m_conditions.emplace_back(Comparator::LT, value); }
+    void LE(const std::string& value) { m_conditions.emplace_back(Comparator::LE, value); }
+    void startsWith(const std::string& value)
+    {
+        m_conditions.emplace_back(Comparator::STARTS_WITH, value);
+    }
+    void endsWith(const std::string& value)
+    {
+        m_conditions.emplace_back(Comparator::ENDS_WITH, value);
+    }
+    void contains(const std::string& value)
+    {
+        m_conditions.emplace_back(Comparator::CONTAINS, value);
+    }
+
+    bool isValid(const std::string_view& key) const
+    {  // all conditions must be satisfied
+        for (auto& cond : m_conditions)
+        {  // conditions should few, so not parallel check for now
+            switch (cond.cmp)
+            {
+            case Comparator::EQ:
+                if (key != cond.value)
+                {
+                    return false;
+                }
+                break;
+            case Comparator::NE:
+                if (key == cond.value)
+                {
+                    return false;
+                }
+                break;
+            case Comparator::GT:
+                if (key <= cond.value)
+                {
+                    return false;
+                }
+                break;
+            case Comparator::GE:
+                if (key < cond.value)
+                {
+                    return false;
+                }
+                break;
+            case Comparator::LT:
+                if (key >= cond.value)
+                {
+                    return false;
+                }
+                break;
+            case Comparator::LE:
+                if (key > cond.value)
+                {
+                    return false;
+                }
+                break;
+            case Comparator::STARTS_WITH:
+                if (!key.starts_with(cond.value))
+                {
+                    return false;
+                }
+                break;
+            case Comparator::ENDS_WITH:
+                if (!key.ends_with(cond.value))
+                {
+                    return false;
+                }
+                break;
+            case Comparator::CONTAINS:
+                if (key.find(cond.value) == std::string::npos)
+                {
+                    return false;
+                }
+                break;
+            default:
+                // undefined Comparator
+                break;
+            }
+        }
+        return true;
+    }
+
+    enum class Comparator : uint8_t
+    {
+        GT = 0,
+        GE = 1,
+        LT = 2,
+        LE = 3,
+        EQ = 4,
+        NE = 5,
+        STARTS_WITH = 6,
+        ENDS_WITH = 7,
+        CONTAINS = 8
+    };
+
+    struct cond
+    {
+        cond(Comparator _cmp, const std::string& _value) : cmp(_cmp), value(_value) {}
+        Comparator cmp;
+        std::string value;
+    };
+
+    std::vector<cond> m_conditions;
+};
+
+class ConditionTest
+{
+public:
+    ConditionTest(const std::string& field,
+        std::function<void(
+            const std::vector<ConditionTupleV320>& conds, std::vector<EntryTuple>& entries)>
+            selectFunc)
+      : m_field(field), m_selectFunc(selectFunc)
+    {}
+    ~ConditionTest() = default;
+
+    void EQ(const std::string& value)
+    {
+        m_condition2.emplace_back((uint8_t)storage::Condition::Comparator::EQ, m_field, value);
+        m_condition1.EQ(value);
+    }
+    void NE(const std::string& value)
+    {
+        m_condition2.emplace_back((uint8_t)storage::Condition::Comparator::NE, m_field, value);
+        m_condition1.NE(value);
+    }
+    void GT(const std::string& value)
+    {
+        m_condition2.emplace_back((uint8_t)storage::Condition::Comparator::GT, m_field, value);
+        m_condition1.GT(value);
+    }
+    void GE(const std::string& value)
+    {
+        m_condition2.emplace_back((uint8_t)storage::Condition::Comparator::GE, m_field, value);
+        m_condition1.GE(value);
+    }
+    void LT(const std::string& value)
+    {
+        m_condition2.emplace_back((uint8_t)storage::Condition::Comparator::LT, m_field, value);
+        m_condition1.LT(value);
+    }
+    void LE(const std::string& value)
+    {
+        m_condition2.emplace_back((uint8_t)storage::Condition::Comparator::LE, m_field, value);
+        m_condition1.LE(value);
+    }
+    void startsWith(const std::string& value)
+    {
+        m_condition2.emplace_back(
+            (uint8_t)storage::Condition::Comparator::STARTS_WITH, m_field, value);
+        m_condition1.startsWith(value);
+    }
+    void endsWith(const std::string& value)
+    {
+        m_condition2.emplace_back(
+            (uint8_t)storage::Condition::Comparator::ENDS_WITH, m_field, value);
+        m_condition1.endsWith(value);
+    }
+    void contains(const std::string& value)
+    {
+        m_condition2.emplace_back(
+            (uint8_t)storage::Condition::Comparator::CONTAINS, m_field, value);
+        m_condition1.contains(value);
+    }
+
+    static std::vector<std::string> getKeys(
+        const std::vector<std::string>& keys, const ConditionNative& cond)
+    {
+        std::vector<std::string> ret;
+        for (auto& key : keys)
+        {
+            if (cond.isValid(key))
+            {
+                ret.push_back(key);
+            }
+        }
+        return ret;
+    }
+
+    static bool checkResultEQ(
+        const std::vector<std::string>& data1, const std::vector<EntryTuple>& data2)
+    {
+        if (data1.size() != data2.size())
+        {
+            return false;
+        }
+        for (size_t i = 0; i < data1.size(); ++i)
+        {
+            if (data1[i] != std::get<0>(data2[i]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    bool isEquivalent(const std::vector<std::string>& data, bool emptyRes = false)
+    {
+        auto ret1 = getKeys(data, m_condition1);
+        std::vector<EntryTuple> entries;
+        m_selectFunc(m_condition2, entries);
+        if (emptyRes)
+        {
+            return checkResultEQ(ret1, entries) && ret1.empty();
+        }
+        return checkResultEQ(ret1, entries);
+    }
+
+private:
+    std::string m_field;
+    ConditionNative m_condition1;
+    std::vector<ConditionTupleV320> m_condition2;
+    std::function<void(
+        const std::vector<ConditionTupleV320>& conds, std::vector<EntryTuple>& entries)>
+        m_selectFunc;
 };
 
 static void generateRandomVector(
@@ -3736,6 +3976,585 @@ BOOST_AUTO_TEST_CASE(containsWasmTest)
         BOOST_CHECK(countPrefix == 0);
         BOOST_CHECK(countSuffix == 0);
         BOOST_CHECK(countContains == 0);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(mixConditionTest)
+{
+    init(false);
+    const int START = 0;
+    const int END = 20;
+    bcos::protocol::BlockNumber number = 1;
+    auto callAddress = tableTestAddress;
+
+    auto _fillZeros = [](int _num) {
+        std::stringstream stream;
+        stream << std::setfill('0') << std::setw(40) << std::right << _num;
+        return stream.str();
+    };
+
+    auto selectFunc = [this, &number, &callAddress](const std::vector<ConditionTupleV320>& conds,
+                          std::vector<EntryTuple>& entries) {
+        LimitTuple limit = {0, 500};
+        auto r1 = selectByCondition(number++, conds, limit, callAddress);
+        codec->decode(r1->data(), entries);
+    };
+
+    {
+        creatTable(number++, "t_test_condv320_mix1", 0, "id", {"value"}, callAddress);
+    }
+
+    // prepare data
+    std::vector<std::string> record;
+    record.reserve(END - START);
+    for (int j = START; j < END; ++j)
+    {
+        boost::log::core::get()->set_logging_enabled(false);
+        record.push_back(_fillZeros(j));
+        insert(number++, record.back(), {"0"}, callAddress);
+        boost::log::core::get()->set_logging_enabled(true);
+    }
+
+    // test GE
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(10));
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.LT(_fillZeros(10));
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // update condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(5));
+            cond.GE(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(10));
+            cond.GE(_fillZeros(5));
+            cond.GE(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.GE(_fillZeros(5));
+            cond.GE(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.LT(_fillZeros(10));
+            cond.GE(_fillZeros(5));
+            cond.GE(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // conflict condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(5));
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(4));
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(4));
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(5));
+            cond.LE(_fillZeros(4));
+            cond.GE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+    }
+
+    // TestGT
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(10));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.LT(_fillZeros(10));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // update condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            cond.GT(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(10));
+            cond.GT(_fillZeros(5));
+            cond.GT(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.GT(_fillZeros(5));
+            cond.GT(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(10));
+            cond.LT(_fillZeros(10));
+            cond.GT(_fillZeros(5));
+            cond.GT(_fillZeros(6));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // conflict condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(5));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(4));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(5));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(4));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(5));
+            cond.LE(_fillZeros(5));
+            cond.GT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+    }
+
+    // test LT
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(10));
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.GT(_fillZeros(10));
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // update condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LT(_fillZeros(16));
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(10));
+            cond.LT(_fillZeros(16));
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.LT(_fillZeros(16));
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.GT(_fillZeros(10));
+            cond.LT(_fillZeros(16));
+            cond.LT(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // conflict condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            cond.LT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            cond.LT(_fillZeros(4));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(5));
+            cond.LT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(5));
+            cond.LT(_fillZeros(4));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            cond.GE(_fillZeros(5));
+            cond.LT(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+    }
+
+    // test LE
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(10));
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.GT(_fillZeros(10));
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // update condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.LE(_fillZeros(16));
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(10));
+            cond.LE(_fillZeros(16));
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.LE(_fillZeros(16));
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(10));
+            cond.GT(_fillZeros(10));
+            cond.LE(_fillZeros(16));
+            cond.LE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        // conflict condition
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            cond.LE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            cond.LE(_fillZeros(4));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GE(_fillZeros(5));
+            cond.LE(_fillZeros(4));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.GT(_fillZeros(5));
+            cond.GE(_fillZeros(5));
+            cond.LE(_fillZeros(5));
+            BOOST_CHECK(cond.isEquivalent(record, true));
+        }
+    }
+
+    // test NE
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.NE(_fillZeros(15));
+            cond.NE(_fillZeros(16));
+            cond.NE(_fillZeros(17));
+            cond.NE(_fillZeros(100));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.NE(_fillZeros(15));
+            cond.NE(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+    }
+
+    // test EQ
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.EQ(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.EQ(_fillZeros(15));
+            cond.EQ(_fillZeros(15));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.EQ(_fillZeros(15));
+            cond.EQ(_fillZeros(16));
+            BOOST_CHECK(cond.isEquivalent(record));
+        }
+    }
+
+    // prepare data
+    std::vector<std::string> recordStartsWith = {"abc", "abcd", "abcdef", "abce"};
+    for (size_t j = 0; j < recordStartsWith.size(); ++j)
+    {
+        boost::log::core::get()->set_logging_enabled(false);
+        insert(number++, recordStartsWith[j], {"0"}, callAddress);
+        boost::log::core::get()->set_logging_enabled(true);
+    }
+
+    // test startsWith
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.startsWith("abcd");
+            BOOST_CHECK(cond.isEquivalent(recordStartsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.startsWith("abc");
+            cond.startsWith("abcd");
+            BOOST_CHECK(cond.isEquivalent(recordStartsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.startsWith("abcd");
+            cond.startsWith("abc");
+            BOOST_CHECK(cond.isEquivalent(recordStartsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.startsWith("abcd");
+            cond.startsWith("abce");
+            BOOST_CHECK(cond.isEquivalent(recordStartsWith, true));
+        }
+    }
+
+
+    std::vector<std::string> recordContainsWith = {"abc", "abcd", "abcdef", "abceabcf"};
+    for (size_t j = 0; j < recordContainsWith.size(); ++j)
+    {
+        boost::log::core::get()->set_logging_enabled(false);
+        insert(number++, recordContainsWith[j], {"0"}, callAddress);
+        boost::log::core::get()->set_logging_enabled(true);
+    }
+
+    // test contains
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.contains("abcd");
+            BOOST_CHECK(cond.isEquivalent(recordContainsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.contains("abc");
+            cond.contains("abcd");
+            BOOST_CHECK(cond.isEquivalent(recordContainsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.contains("abc");
+            cond.contains("bcf");
+            BOOST_CHECK(cond.isEquivalent(recordContainsWith));
+        }
+    }
+
+
+    std::vector<std::string> recordEndsWith = {"cba", "dcba", "fedcba", "ecba"};
+    for (size_t j = 0; j < recordEndsWith.size(); ++j)
+    {
+        boost::log::core::get()->set_logging_enabled(false);
+        insert(number++, recordEndsWith[j], {"0"}, callAddress);
+        boost::log::core::get()->set_logging_enabled(true);
+    }
+
+    // test ends_with
+    {
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.endsWith("dcba");
+            BOOST_CHECK(cond.isEquivalent(recordEndsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.endsWith("cba");
+            cond.endsWith("dcba");
+            BOOST_CHECK(cond.isEquivalent(recordEndsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.endsWith("dcba");
+            cond.endsWith("cba");
+            BOOST_CHECK(cond.isEquivalent(recordEndsWith));
+        }
+
+        {
+            ConditionTest cond("id", selectFunc);
+            cond.endsWith("dcba");
+            cond.endsWith("ecba");
+            BOOST_CHECK(cond.isEquivalent(recordEndsWith));
+        }
     }
 }
 

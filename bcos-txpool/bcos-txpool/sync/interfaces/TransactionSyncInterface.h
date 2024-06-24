@@ -36,9 +36,6 @@ public:
 
     virtual ~TransactionSyncInterface() = default;
 
-    virtual void start() = 0;
-    virtual void stop() = 0;
-
     virtual void requestMissedTxs(bcos::crypto::PublicPtr _generatedNodeID,
         bcos::crypto::HashListPtr _missedTxs, bcos::protocol::Block::Ptr _verifiedProposal,
         std::function<void(Error::Ptr, bool)> _onVerifyFinished) = 0;
@@ -48,6 +45,7 @@ public:
 
     virtual TransactionSyncConfig::Ptr config() { return m_config; }
     virtual void onEmptyTxs() = 0;
+    virtual void stop() = 0;
 
 protected:
     TransactionSyncConfig::Ptr m_config;

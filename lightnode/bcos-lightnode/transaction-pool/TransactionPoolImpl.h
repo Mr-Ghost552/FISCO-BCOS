@@ -12,7 +12,6 @@
 #include <bcos-utilities/FixedBytes.h>
 #include <boost/exception/diagnostic_information.hpp>
 #include <boost/throw_exception.hpp>
-#include <future>
 #include <memory>
 
 namespace bcos::transaction_pool
@@ -47,7 +46,7 @@ private:
         if (submitResult && submitResult->transactionReceipt())
         {
             auto receiptImpl =
-                std::dynamic_pointer_cast<bcostars::protocol::TransactionReceiptImpl>(
+                std::dynamic_pointer_cast<bcostars::protocol::TransactionReceiptImpl const>(
                     submitResult->transactionReceipt());
             receipt = std::move(const_cast<bcostars::TransactionReceipt&>(receiptImpl->inner()));
         }

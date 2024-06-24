@@ -62,10 +62,23 @@ public:
         {
             return;
         }
+        // NOTE: If prePrepare is not null, it means prePrepare is already exist, and it will be
+        // replaced without reset proposal txs to unsealed. So we need to add the old prePrepare to
+        // exception prePrepare list, and it will be processed resetTxs when finalizeConsensus and
+        // reachNewView.
+        if (m_prePrepare && m_prePrepare->consensusProposal())
+        {
+            m_exceptionPrePrepareList.push_back(m_prePrepare);
+        }
         m_prePrepare = _prePrepareMsg;
         PBFT_LOG(INFO) << LOG_DESC("addPrePrepareCache") << printPBFTMsgInfo(_prePrepareMsg)
                        << LOG_KV("sys", _prePrepareMsg->consensusProposal()->systemProposal())
                        << m_config->printCurrentState();
+    }
+
+    void addExceptionPrePrepareCache(PBFTMessageInterface::Ptr _prePrepareMsg)
+    {
+        m_exceptionPrePrepareList.push_back(std::move(_prePrepareMsg));
     }
 
     bcos::protocol::BlockNumber index() const { return m_index; }
@@ -84,6 +97,8 @@ public:
     virtual bool shouldStopTimer();
     // reset the cache after viewchange
     virtual void resetCache(ViewType _curView);
+
+    virtual void resetExceptionCache(ViewType _curView);
 
     virtual void setCheckPointProposal(PBFTProposalInterface::Ptr _proposal);
     PBFTProposalInterface::Ptr checkPointProposal() { return m_checkpointProposal; }
@@ -123,6 +138,7 @@ public:
         m_submitted.store(false);
         m_precommitted.store(false);
         m_checkpointProposal = nullptr;
+        m_checkPointStartTime = 0;
     }
 
 protected:
@@ -209,10 +225,13 @@ protected:
     QuorumRecoderType m_commitReqWeight;
 
     PBFTMessageInterface::Ptr m_prePrepare = nullptr;
+    std::vector<PBFTMessageInterface::Ptr> m_exceptionPrePrepareList = {};
     PBFTMessageInterface::Ptr m_precommit = nullptr;
     PBFTMessageInterface::Ptr m_precommitWithoutData = nullptr;
 
     PBFTProposalInterface::Ptr m_checkpointProposal = nullptr;
+    // time record for checkPoint start
+    std::uint64_t m_checkPointStartTime = 0;
 
     CollectionCacheType m_checkpointCacheList;
     QuorumRecoderType m_checkpointCacheWeight;

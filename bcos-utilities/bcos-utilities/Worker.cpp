@@ -23,6 +23,7 @@
 #include <pthread.h>
 #endif
 
+#include "BoostLog.h"
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include <chrono>
@@ -75,7 +76,7 @@ void Worker::startWorking()
                 {
                     BCOS_LOG(WARNING) << LOG_DESC("Exception thrown in Worker thread")
                                       << LOG_KV("threadName", m_threadName)
-                                      << LOG_KV("errorMsg", boost::diagnostic_information(e));
+                                      << LOG_KV("msg", boost::diagnostic_information(e));
                 }
 
                 {

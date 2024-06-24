@@ -20,6 +20,7 @@
  */
 #pragma once
 
+#include "bcos-framework/ledger/Features.h"
 #include "bcos-framework/storage/StorageInterface.h"
 #include "bcos-framework/storage/Table.h"
 #include "tbb/enumerable_thread_specific.h"
@@ -106,7 +107,8 @@ public:
         BOOST_THROW_EXCEPTION(BCOS_ERROR(-1, "Called interface count method"));
     }
 
-    virtual crypto::HashType hash(const bcos::crypto::Hash::Ptr& hashImpl) const = 0;
+    virtual crypto::HashType hash(
+        const bcos::crypto::Hash::Ptr& hashImpl, const ledger::Features& features) const = 0;
     virtual void setPrev(std::shared_ptr<StorageInterface> prev)
     {
         std::unique_lock<std::shared_mutex> lock(m_prevMutex);

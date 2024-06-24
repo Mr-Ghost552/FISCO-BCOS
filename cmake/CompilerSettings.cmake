@@ -40,8 +40,8 @@ if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR("${CMAKE_CXX_COMPILER_ID}" MATC
     add_compile_options(-Wno-unused-variable)
     add_compile_options(-Wno-error=unknown-pragmas)
     add_compile_options(-Wno-error=deprecated-declarations)
-
     add_compile_options(-fno-omit-frame-pointer)
+    add_compile_options(-Wno-error=strict-aliasing)
 
     if(NOT APPLE)
         set(CMAKE_CXX_VISIBILITY_PRESET hidden)
@@ -68,7 +68,7 @@ if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR("${CMAKE_CXX_COMPILER_ID}" MATC
             SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static")
         endif()
 
-        # SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Bdynamic -ldl -lpthread -Wl,-Bstatic -static-libstdc++ ")
+        # SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-Bdynamic -ldl -lpthread -Wl,-Bstatic")
     endif()
 
     if(TESTS)
@@ -78,15 +78,22 @@ if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR("${CMAKE_CXX_COMPILER_ID}" MATC
     # Configuration-specific compiler settings.
     set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
     set(CMAKE_CXX_FLAGS_MINSIZEREL "-Os -DNDEBUG")
-    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g -DNDEBUG")
+    if(ONLY_CPP_SDK)
+        set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+    else ()
+        set(CMAKE_CXX_FLAGS_RELEASE "-O3 -g -DNDEBUG")
+    endif ()
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DNDEBUG")
 
-    if(USE_LD_GOLD)
+    if("${LINKER}" MATCHES "gold")
         execute_process(COMMAND ${CMAKE_C_COMPILER} -fuse-ld=gold -Wl,--version ERROR_QUIET OUTPUT_VARIABLE LD_VERSION)
         if("${LD_VERSION}" MATCHES "GNU gold")
             set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold")
             set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=gold")
         endif()
+    elseif("${LINKER}" MATCHES "mold")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=mold")
+        set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=mold")
     endif()
 
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
@@ -100,13 +107,27 @@ if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR("${CMAKE_CXX_COMPILER_ID}" MATC
 
         add_compile_options(-fstack-protector-strong)
         add_compile_options(-fstack-protector)
+        add_compile_options(-fno-omit-frame-pointer)
 
         if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.0)
             add_compile_options(-fcoroutines)
+            add_compile_options(-Wno-error=unused-value)
         endif()
 
         add_compile_options(-fPIC)
-        add_compile_options(-Wno-error=restrict)
+        add_compile_options(-Wno-error=nonnull)
+        add_compile_options(-foptimize-sibling-calls)
+        add_compile_options(-Wno-stringop-overflow)
+        add_compile_options(-Wno-restrict)
+        add_compile_options(-Wno-error=format-truncation)
+
+        if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 11.0)
+            add_compile_options(-Wno-stringop-overread)
+            add_compile_options(-Wno-maybe-uninitialized)
+            add_compile_options(-Wno-array-bounds)
+            add_compile_options(-Wno-aggressive-loop-optimizations)
+        endif()
+        # add_compile_options(-fconcepts-diagnostics-depth=10)
     elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
         if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 4.0)
             set(CMAKE_CXX_FLAGS_DEBUG "-O -g")
@@ -114,12 +135,14 @@ if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR("${CMAKE_CXX_COMPILER_ID}" MATC
 
         add_compile_options(-fstack-protector)
         add_compile_options(-Winconsistent-missing-override)
+        add_compile_options(-foptimize-sibling-calls)
 
         # Some Linux-specific Clang settings.  We don't want these for OS X.
         if("${CMAKE_SYSTEM_NAME}" MATCHES "Linux")
             # Tell Boost that we're using Clang's libc++.   Not sure exactly why we need to do.
             add_definitions(-DBOOST_ASIO_HAS_CLANG_LIBCXX)
-
+            # Fix for Boost UUID on old kernel version Linux.  See https://github.com/boostorg/uuid/issues/91
+            add_definitions(-DBOOST_UUID_RANDOM_PROVIDER_FORCE_POSIX)
             # Use fancy colors in the compiler diagnostics
             add_compile_options(-fcolor-diagnostics)
         endif()
@@ -148,7 +171,8 @@ if(("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU") OR("${CMAKE_CXX_COMPILER_ID}" MATC
         endif()
     endif()
 elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "MSVC")
-    add_definitions(-DUSE_STD_RANGES)
+    add_compile_definitions(NOMINMAX)
+    #add_definitions(-DUSE_STD_RANGES)
     add_compile_options(/std:c++latest)
     add_compile_options(-bigobj)
 

@@ -73,7 +73,7 @@ public:
 
     PromiseTransactionExecutive(ThreadPool::Ptr pool, const BlockContext& blockContext,
         std::string contractAddress, int64_t contextID, int64_t seq,
-                                const wasm::GasInjector& gasInjector)
+        const wasm::GasInjector& gasInjector)
       : CoroutineTransactionExecutive(
             blockContext, std::move(contractAddress), contextID, seq, gasInjector),
         m_messageSwapper(std::make_shared<MessagePromiseSwapper>(pool))
@@ -86,6 +86,9 @@ public:
     // External call request
     CallParameters::UniquePtr externalCall(CallParameters::UniquePtr input) override;  // call by
     // hostContext
+
+    // Execute finish and waiting for FINISH or REVERT
+    CallParameters::UniquePtr waitingFinish(CallParameters::UniquePtr input) override;
 
     // External request key locks, throw exception if dead lock detected
     void externalAcquireKeyLocks(std::string acquireKeyLock);
@@ -101,8 +104,13 @@ public:
         return exchangeMessage;
     }
 
+    MessagePromiseSwapper::Ptr getPromiseMessageSwapper() { return m_messageSwapper; }
+    void setPromiseMessageSwapper(MessagePromiseSwapper::Ptr swapper)
+    {
+        m_messageSwapper = swapper;
+    }
+
 private:
-    std::shared_ptr<SyncStorageWrapper> m_syncStorageWrapper;
     MessagePromiseSwapper::Ptr m_messageSwapper;
 };
 }  // namespace executor

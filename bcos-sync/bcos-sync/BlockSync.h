@@ -22,6 +22,7 @@
 #include "bcos-sync/BlockSyncConfig.h"
 #include "bcos-sync/state/DownloadingQueue.h"
 #include "bcos-sync/state/SyncPeerStatus.h"
+#include "bcos-sync/utilities/SyncTreeTopology.h"
 #include "bcos-tool/NodeTimeMaintenance.h"
 #include <bcos-framework/sync/BlockSyncInterface.h>
 #include <bcos-utilities/ThreadPool.h>
@@ -35,6 +36,7 @@ class BlockSync : public BlockSyncInterface,
 {
 public:
     using Ptr = std::shared_ptr<BlockSync>;
+    // FIXME: make idle configable
     BlockSync(BlockSyncConfig::Ptr _config, unsigned _idleWaitMs = 200);
     ~BlockSync() override = default;
 
@@ -78,6 +80,13 @@ public:
 
     void enableAsMaster(bool _masterNode);
 
+    void setAllowFreeNodeSync(bool flag) { m_allowFreeNode = flag; }
+
+    void setFaultyNodeBlockDelta(bcos::protocol::BlockNumber _delta)
+    {
+        c_FaultyNodeBlockDelta = _delta;
+    }
+
 protected:
     virtual void asyncNotifyBlockSyncMessage(Error::Ptr _error, bcos::crypto::NodeIDPtr _nodeID,
         bytesConstRef _data, std::function<void(bytesConstRef)> _sendResponse,
@@ -106,12 +115,17 @@ protected:
     virtual void maintainPeersConnection();
     // block requests
     virtual void maintainBlockRequest();
+    // send sync status by tree
+    virtual void sendSyncStatusByTree();
     // broadcast sync status
     virtual void broadcastSyncStatus();
 
     virtual void onNewBlock(bcos::ledger::LedgerConfig::Ptr _ledgerConfig);
 
     virtual void downloadFinish();
+
+    // update SyncTreeTopology node info
+    virtual void updateTreeTopologyNodeInfo();
 
 protected:
     void requestBlocks(bcos::protocol::BlockNumber _from, bcos::protocol::BlockNumber _to);
@@ -140,5 +154,8 @@ protected:
     bcos::protocol::BlockNumber c_FaultyNodeBlockDelta = 50;
 
     std::atomic_bool m_masterNode = {false};
+    bool m_allowFreeNode = false;
+
+    SyncTreeTopology::Ptr m_syncTreeTopology{nullptr};
 };
 }  // namespace bcos::sync

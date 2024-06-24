@@ -153,7 +153,7 @@ void Service::heartBeat()
     m_timer->async_wait([self](const boost::system::error_code& error) {
         if (error)
         {
-            SERVICE_LOG(WARNING) << "timer canceled" << LOG_KV("errorCode", error);
+            SERVICE_LOG(WARNING) << "timer canceled" << LOG_KV("code", error);
             return;
         }
         auto service = self.lock();
@@ -195,9 +195,9 @@ void Service::onConnect(
     }
     if (e.errorCode())
     {
-        SERVICE_LOG(WARNING) << LOG_DESC("onConnect") << LOG_KV("errorCode", e.errorCode())
+        SERVICE_LOG(WARNING) << LOG_DESC("onConnect") << LOG_KV("code", e.errorCode())
                              << LOG_KV("p2pid", p2pID) << LOG_KV("nodeName", p2pInfo.nodeName)
-                             << LOG_KV("endpoint", peer) << LOG_KV("errorMessage", e.what());
+                             << LOG_KV("endpoint", peer) << LOG_KV("message", e.what());
 
         return;
     }
@@ -271,8 +271,8 @@ void Service::onDisconnect(NetworkException e, P2PSession::Ptr p2pSession)
 
         if (e.errorCode() == P2PExceptionType::DuplicateSession)
             return;
-        SERVICE_LOG(WARNING) << LOG_DESC("onDisconnect") << LOG_KV("errorCode", e.errorCode())
-                             << LOG_KV("what", boost::diagnostic_information(e));
+        SERVICE_LOG(INFO) << LOG_DESC("onDisconnect") << LOG_KV("code", e.errorCode())
+                          << LOG_KV("what", boost::diagnostic_information(e));
         RecursiveGuard l(x_nodes);
         for (auto& it : m_staticNodes)
         {
@@ -359,10 +359,9 @@ void Service::onMessage(NetworkException e, SessionFace::Ptr session, Message::P
 
         if (e.errorCode())
         {
-            SERVICE_LOG(WARNING) << LOG_DESC("disconnect error P2PSession")
-                                 << LOG_KV("p2pid", p2pID) << LOG_KV("endpoint", nodeIPEndpoint)
-                                 << LOG_KV("errorCode", e.errorCode())
-                                 << LOG_KV("errorMessage", e.what());
+            SERVICE_LOG(INFO) << LOG_DESC("disconnect error P2PSession") << LOG_KV("p2pid", p2pID)
+                              << LOG_KV("endpoint", nodeIPEndpoint) << LOG_KV("code", e.errorCode())
+                              << LOG_KV("message", e.what());
 
             if (p2pSession)
             {
@@ -388,10 +387,15 @@ void Service::onMessage(NetworkException e, SessionFace::Ptr session, Message::P
 
         /// SERVICE_LOG(TRACE) << "Service onMessage: " << message->seq();
         auto p2pMessage = std::dynamic_pointer_cast<P2PMessage>(message);
-        SERVICE_LOG(TRACE) << LOG_DESC("onMessage receive message") << LOG_KV("p2pid", p2pID)
-                           << LOG_KV("endpoint", nodeIPEndpoint) << LOG_KV("seq", p2pMessage->seq())
-                           << LOG_KV("version", p2pMessage->version())
-                           << LOG_KV("packetType", p2pMessage->packetType());
+        if (c_fileLogLevel <= TRACE) [[unlikely]]
+        {
+            SERVICE_LOG(TRACE) << LOG_DESC("onMessage receive message")
+                               << LOG_KV("p2pid", P2PMessage::printP2PIDElegantly(p2pID))
+                               << LOG_KV("endpoint", nodeIPEndpoint)
+                               << LOG_KV("seq", p2pMessage->seq())
+                               << LOG_KV("version", p2pMessage->version())
+                               << LOG_KV("packetType", p2pMessage->packetType());
+        }
 
         auto packetType = p2pMessage->packetType();
         auto ext = p2pMessage->ext();
@@ -403,6 +407,16 @@ void Service::onMessage(NetworkException e, SessionFace::Ptr session, Message::P
             return;
         }
 
+        if (message->packetType() == gateway::AMOPMessageType)
+        {
+            // AMOP May be disable by config.ini
+            SERVICE_LOG(DEBUG) << LOG_DESC("Unrecognized message type")
+                               << LOG_DESC(": AMOP is disabled!") << LOG_KV("seq", message->seq())
+                               << LOG_KV("packetType", packetType) << LOG_KV("ext", ext)
+                               << LOG_KV("version", version)
+                               << LOG_KV("dst p2p", p2pMessage->dstP2PNodeID());
+            return;
+        }
         SERVICE_LOG(ERROR) << LOG_DESC("Unrecognized message type") << LOG_KV("seq", message->seq())
                            << LOG_KV("packetType", packetType) << LOG_KV("ext", ext)
                            << LOG_KV("version", version)
@@ -494,8 +508,7 @@ void Service::asyncSendMessageByNodeID(
             return;
         }
 
-
-        P2PSession::Ptr session = nullptr;
+        P2PSession::Ptr session;
         {
             RecursiveGuard lock(x_sessions);
             auto it = m_sessions.find(nodeID);
@@ -504,6 +517,7 @@ void Service::asyncSendMessageByNodeID(
                 session = it->second;
             }
         }
+
         if (session)
         {
             if (message->seq() == 0)
@@ -511,7 +525,7 @@ void Service::asyncSendMessageByNodeID(
                 message->setSeq(m_messageFactory->newSeq());
             }
             // for compatibility_version consideration
-            sendMessageToSession(session, message, options, callback);
+            sendMessageToSession(std::move(session), message, options, callback);
         }
         else
         {
@@ -520,7 +534,7 @@ void Service::asyncSendMessageByNodeID(
                 NetworkException e(-1, "send message failed for no network established");
                 callback(e, nullptr, nullptr);
             }
-            SERVICE_LOG(WARNING) << "Node inactive" << LOG_KV("nodeid", nodeID);
+            SERVICE_LOG(INFO) << "Node inactive" << LOG_KV("nodeid", nodeID);
         }
     }
     catch (std::exception& e)
@@ -530,10 +544,8 @@ void Service::asyncSendMessageByNodeID(
 
         if (callback)
         {
-            m_host->threadPool()->enqueue([callback, e] {
-                callback(NetworkException(Disconnect, "Disconnect"), P2PSession::Ptr(),
-                    P2PMessage::Ptr());
-            });
+            callback(
+                NetworkException(Disconnect, "Disconnect"), P2PSession::Ptr(), P2PMessage::Ptr());
         }
     }
 }
@@ -550,7 +562,7 @@ void Service::asyncBroadcastMessage(P2PMessage::Ptr message, Options options)
 
         for (auto& session : sessions)
         {
-            asyncSendMessageByNodeID(session.first, message, CallbackFuncWithSession(), options);
+            asyncSendMessageByNodeID(session.first, message, nullptr, options);
         }
     }
     catch (std::exception& e)
@@ -616,6 +628,13 @@ void Service::asyncSendMessageByP2PNodeID(uint16_t _type, P2pID _dstNodeID, byte
         return;
     }
     auto p2pMessage = newP2PMessage(_type, _payload);
+
+    if (!_callback)
+    {
+        asyncSendMessageByNodeID(_dstNodeID, p2pMessage, nullptr);
+        return;
+    }
+
     asyncSendMessageByNodeID(
         _dstNodeID, p2pMessage,
         [_dstNodeID, _callback](NetworkException _e, std::shared_ptr<P2PSession>,
@@ -623,9 +642,9 @@ void Service::asyncSendMessageByP2PNodeID(uint16_t _type, P2pID _dstNodeID, byte
             auto packetType = _p2pMessage ? _p2pMessage->packetType() : (uint16_t)0;
             if (_e.errorCode() != 0)
             {
-                SERVICE_LOG(WARNING) << LOG_DESC("asyncSendMessageByP2PNodeID error")
-                                     << LOG_KV("code", _e.errorCode()) << LOG_KV("msg", _e.what())
-                                     << LOG_KV("type", packetType) << LOG_KV("dst", _dstNodeID);
+                SERVICE_LOG(INFO) << LOG_DESC("asyncSendMessageByP2PNodeID error")
+                                  << LOG_KV("code", _e.errorCode()) << LOG_KV("msg", _e.what())
+                                  << LOG_KV("type", packetType) << LOG_KV("dst", _dstNodeID);
                 if (_callback)
                 {
                     _callback(
@@ -693,9 +712,8 @@ void Service::onReceiveProtocol(
 {
     if (_error.errorCode())
     {
-        SERVICE_LOG(WARNING) << LOG_DESC("onReceiveProtocol error")
-                             << LOG_KV("errorCode", _error.errorCode())
-                             << LOG_KV("errorMsg", _error.what())
+        SERVICE_LOG(WARNING) << LOG_DESC("onReceiveProtocol failed")
+                             << LOG_KV("code", _error.errorCode()) << LOG_KV("msg", _error.what())
                              << LOG_KV("peer", _session ? _session->p2pID() : "unknown");
         return;
     }
@@ -734,5 +752,59 @@ void Service::onReceiveProtocol(
                              << LOG_KV("peer", _session ? _session->p2pID() : "unknown")
                              << LOG_KV("packetType", _message->packetType())
                              << LOG_KV("seq", _message->seq());
+    }
+}
+
+void Service::updatePeerBlacklist(const std::set<std::string>& _strList, const bool _enable)
+{
+    // update the config
+    m_host->peerBlacklist()->update(_strList, _enable);
+    // disconnect nodes in the blacklist
+    if (true == _enable)
+    {
+        RecursiveGuard l(x_sessions);
+        auto s = m_sessions;  // make a copy in case m_sessions changes in onMessage cause iterator
+                              // invalidation
+        for (auto session : s)
+        {
+            auto p2pIdWithoutExtInfo = session.second->p2pInfo().p2pIDWithoutExtInfo;
+            if (_strList.end() == _strList.find(p2pIdWithoutExtInfo))
+            {
+                continue;
+            }
+
+            SERVICE_LOG(INFO) << LOG_DESC("updatePeerBlacklist, disconnect peer in blacklist")
+                              << LOG_KV("peer", p2pIdWithoutExtInfo);
+
+            updateStaticNodes(session.second->session()->socket(), session.second->p2pID());
+            session.second->session()->disconnect(DisconnectReason::InBlacklistReason);
+        }
+    }
+}
+
+void Service::updatePeerWhitelist(const std::set<std::string>& _strList, const bool _enable)
+{
+    // update the config
+    m_host->peerWhitelist()->update(_strList, _enable);
+    // disconnect nodes not in the whitelist
+    if (true == _enable)
+    {
+        RecursiveGuard l(x_sessions);
+        auto s = m_sessions;  // make a copy in case m_sessions changes in onMessage cause iterator
+                              // invalidation
+        for (auto session : s)
+        {
+            auto p2pIdWithoutExtInfo = session.second->p2pInfo().p2pIDWithoutExtInfo;
+            if (_strList.end() != _strList.find(p2pIdWithoutExtInfo))
+            {
+                continue;
+            }
+
+            SERVICE_LOG(INFO) << LOG_DESC("updatePeerWhitelist, disconnect peer not in whitelist")
+                              << LOG_KV("peer", p2pIdWithoutExtInfo);
+
+            updateStaticNodes(session.second->session()->socket(), session.second->p2pID());
+            session.second->session()->disconnect(DisconnectReason::NotInWhitelistReason);
+        }
     }
 }

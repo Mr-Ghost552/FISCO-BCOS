@@ -18,16 +18,17 @@
  * @date 2021-02-24
  */
 
+#include "bcos-utilities/BoostLog.h"
 #define NOMINMAX
-
-#include "Common.h"
-#include "Exceptions.h"
-#include <csignal>
 #if defined(WIN32) || defined(WIN64) || defined(_WIN32) || defined(_WIN32_)
+#define _WIN32_WINNT 0x0601
 #include <windows.h>
 #else
 #include <sys/time.h>
 #endif
+#include "Common.h"
+#include "Exceptions.h"
+#include <csignal>
 #ifdef __APPLE__
 #include <pthread.h>
 #endif
@@ -86,6 +87,53 @@ void errorExit(std::stringstream& _exitInfo, Exception const& _exception)
     BOOST_THROW_EXCEPTION(_exception << errinfo_comment(_exitInfo.str()));
 }
 
+s256 u2s(u256 _u)
+{
+    static const bigint c_end = bigint(1) << 256;
+    /// get the +/- symbols
+    if (boost::multiprecision::bit_test(_u, 255))
+        return s256(-(c_end - _u));
+    else
+        return s256(_u);
+}
+u256 s2u(s256 _u)
+{
+    static const bigint c_end = bigint(1) << 256;
+    if (_u >= 0)
+        return u256(_u);
+    else
+        return u256(c_end + _u);
+}
+bool isalNumStr(std::string const& _stringData)
+{
+    for (auto ch : _stringData)
+    {
+        if (isalnum(ch))
+        {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+double calcAvgRate(uint64_t _data, uint32_t _intervalMS)
+{
+    if (_intervalMS > 0)
+    {
+        auto avgRate = (double)_data * 8 * 1000 / 1024 / 1024 / _intervalMS;
+        return avgRate;
+    }
+    return 0;
+}
+uint32_t calcAvgQPS(uint64_t _requestCount, uint32_t _intervalMS)
+{
+    if (_intervalMS > 0)
+    {
+        auto qps = _requestCount * 1000 / _intervalMS;
+        return qps;
+    }
+    return 0;
+}
 }  // namespace bcos
 
 void bcos::pthread_setThreadName(std::string const& _n)
@@ -95,4 +143,21 @@ void bcos::pthread_setThreadName(std::string const& _n)
 #elif defined(__APPLE__)
     pthread_setname_np(_n.c_str());
 #endif
+}
+
+std::string bcos::pthread_getThreadName()
+{
+#if defined(__GLIBC__) || defined(__APPLE__)
+    std::array<char, 16> name = {0};
+    auto err = pthread_getname_np(pthread_self(), (char*)name.data(), name.size());
+    if (err == 0)
+    {
+        if (name[0] == '\0')
+        {
+            return "";
+        }
+        return {name.data()};
+    }
+#endif
+    return "";
 }

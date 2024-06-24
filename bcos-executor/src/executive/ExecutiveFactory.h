@@ -22,7 +22,7 @@
 #pragma once
 
 #include "../executor/TransactionExecutor.h"
-//#include "PromiseTransactionExecutive.h"
+// #include "PromiseTransactionExecutive.h"
 #include <bcos-framework/protocol/GlobalConfig.h>
 #include <tbb/concurrent_unordered_map.h>
 #include <boost/algorithm/string.hpp>
@@ -59,8 +59,10 @@ public:
     }
 
     virtual ~ExecutiveFactory() = default;
+    //    virtual std::shared_ptr<TransactionExecutive> build(const std::string& _contractAddress,
+    //        int64_t contextID, int64_t seq, bool useCoroutine = true);
     virtual std::shared_ptr<TransactionExecutive> build(const std::string& _contractAddress,
-        int64_t contextID, int64_t seq, bool useCoroutine = true);
+        int64_t contextID, int64_t seq, ExecutiveType execType = ExecutiveType::coroutine);
     const BlockContext& getBlockContext() { return m_blockContext; };
 
     std::shared_ptr<precompiled::Precompiled> getPrecompiled(const std::string& address) const;
@@ -80,6 +82,8 @@ protected:
     bcos::ThreadPool::Ptr m_poolForPromiseWait;
 };
 
+class ShardingTransactionExecutive;
+
 class ShardingExecutiveFactory : public ExecutiveFactory
 {
 public:
@@ -96,7 +100,10 @@ public:
     ~ShardingExecutiveFactory() override = default;
 
     std::shared_ptr<TransactionExecutive> build(const std::string& _contractAddress,
-        int64_t contextID, int64_t seq, bool useCoroutine = true) override;
+        int64_t contextID, int64_t seq, ExecutiveType execType = ExecutiveType::coroutine) override;
+
+    std::shared_ptr<TransactionExecutive> buildChild(ShardingTransactionExecutive* parent,
+        const std::string& _contractAddress, int64_t contextID, int64_t seq);
 };
 
 }  // namespace bcos::executor

@@ -17,7 +17,6 @@
 #------------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.10)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "12" CACHE STRING "Minimum OS X deployment version")
 
 
 project(bcos-tool VERSION ${VERSION})
@@ -41,10 +40,10 @@ if(TESTS)
 endif()
 
 # for code coverage
-if (COVERAGE)
-    include(Coverage)
-    config_coverage("tool-cov" "'/usr*' '${CMAKE_CURRENT_SOURCE_DIR}/bcos-cmake-scripts*' '${CMAKE_CURRENT_SOURCE_DIR}/test/bcos-test*'")
-endif ()
+#if (COVERAGE)
+#    include(Coverage)
+#    config_coverage("tool-cov" "'/usr*' '${CMAKE_CURRENT_SOURCE_DIR}/bcos-cmake-scripts*' '${CMAKE_CURRENT_SOURCE_DIR}/test/bcos-test*'")
+#endif ()
 
 include(GNUInstallDirs)
 install(TARGETS ${TOOL_TARGET} EXPORT fiscobcosTargets ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")

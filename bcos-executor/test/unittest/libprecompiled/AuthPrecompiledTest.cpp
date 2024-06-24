@@ -18,10 +18,10 @@
  * @date 2021-11-15
  */
 
+#include "bcos-framework/executor/PrecompiledTypeDef.h"
 #include "libprecompiled/PreCompiledFixture.h"
 #include "precompiled/extension/AuthManagerPrecompiled.h"
 #include "precompiled/extension/ContractAuthMgrPrecompiled.h"
-#include <bcos-framework/executor/PrecompiledTypeDef.h>
 #include <bcos-utilities/testutils/TestPromptFixture.h>
 #include <libinitializer/AuthInitializer.h>
 
@@ -52,7 +52,8 @@ public:
     {
         bytes input;
         boost::algorithm::unhex(helloBin, std::back_inserter(input));
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", input, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", input, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
 
         auto hash = tx->hash();
@@ -108,7 +109,8 @@ public:
     {
         bytes input;
         boost::algorithm::unhex(helloBin, std::back_inserter(input));
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", input, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", input, std::to_string(101), 100001, "1", "1");
         if (_address != Address())
         {
             tx->forceSender(_address.asBytes());
@@ -141,7 +143,7 @@ public:
         // --------------------------------
 
         std::promise<bcos::protocol::ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(
+        executor->executeTransaction(
             std::move(params), [&](bcos::Error::UniquePtr&& error,
                                    bcos::protocol::ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
@@ -150,53 +152,27 @@ public:
 
         auto result = executePromise.get_future().get();
 
-        /// call Auth manager to check deploy auth
-        result->setSeq(1001);
-
-        std::promise<bcos::protocol::ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(
-            std::move(result), [&](bcos::Error::UniquePtr&& error,
-                                   bcos::protocol::ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-
-        auto result2 = executePromise2.get_future().get();
-
-        /// callback to create context
-        result2->setSeq(1000);
-
-        std::promise<bcos::protocol::ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(
-            std::move(result2), [&](bcos::Error::UniquePtr&& error,
-                                    bcos::protocol::ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-
-        auto result3 = executePromise3.get_future().get();
-
         if (_noAuth)
         {
-            BOOST_CHECK_EQUAL(result3->type(), ExecutionMessage::REVERT);
-            BOOST_CHECK_EQUAL(result3->newEVMContractAddress(), "");
+            BOOST_CHECK_EQUAL(result->type(), ExecutionMessage::REVERT);
+            BOOST_CHECK_EQUAL(result->newEVMContractAddress(), "");
         }
         else
         {
-            BOOST_CHECK_EQUAL(result3->type(), ExecutionMessage::FINISHED);
-            BOOST_CHECK_EQUAL(result3->newEVMContractAddress(), newAddress);
-            BOOST_CHECK_LT(result3->gasAvailable(), gas);
+            BOOST_CHECK_EQUAL(result->type(), ExecutionMessage::FINISHED);
+            BOOST_CHECK_EQUAL(result->newEVMContractAddress(), newAddress);
+            BOOST_CHECK_LT(result->gasAvailable(), gas);
         }
-        BOOST_CHECK_EQUAL(result3->contextID(), 99);
-        BOOST_CHECK_EQUAL(result3->seq(), 1000);
-        BOOST_CHECK_EQUAL(result3->create(), false);
-        BOOST_CHECK_EQUAL(result3->origin(), sender);
-        BOOST_CHECK_EQUAL(result3->from(), newAddress);
-        BOOST_CHECK(result3->to() == sender);
+        BOOST_CHECK_EQUAL(result->contextID(), 99);
+        BOOST_CHECK_EQUAL(result->seq(), 1000);
+        BOOST_CHECK_EQUAL(result->create(), false);
+        BOOST_CHECK_EQUAL(result->origin(), sender);
+        BOOST_CHECK_EQUAL(result->from(), newAddress);
+        BOOST_CHECK(result->to() == sender);
 
         commitBlock(_number);
 
-        return result3;
+        return result;
     }
 
     ExecutionMessage::UniquePtr deployHello2InAuthCheck(
@@ -204,7 +180,8 @@ public:
     {
         bytes input;
         boost::algorithm::unhex(h2, std::back_inserter(input));
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", input, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", input, std::to_string(101), 100001, "1", "1");
         if (_address != Address())
         {
             tx->forceSender(_address.asBytes());
@@ -323,7 +300,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("get()");
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         if (_address != Address())
         {
             tx->forceSender(_address.asBytes());
@@ -346,7 +324,7 @@ public:
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
@@ -367,7 +345,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("set(string)", _value);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         if (_address != Address())
         {
             tx->forceSender(_address.asBytes());
@@ -390,7 +369,7 @@ public:
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
@@ -417,7 +396,8 @@ public:
         uint8_t type = (_type == AuthType::WHITE_LIST_MODE) ? 1 : 2;
         auto t = toString32(h256(type));
         bytes in = codec->encodeWithSig("setMethodAuthType(address,bytes4,uint8)", _path, fun, t);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -436,64 +416,20 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result = executePromise.get_future().get();
 
-        result->setSeq(1001);
-
-        /// internal call get admin
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-
-        /// callback to precompiled
-        result2->setSeq(1000);
-
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
-        result3->setSeq(1002);
-
-        /// internal call set contract auth type
-        std::promise<ExecutionMessage::UniquePtr> executePromise4;
-        executor->dmcExecuteTransaction(std::move(result3),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise4.set_value(std::move(result));
-            });
-        auto result4 = executePromise4.get_future().get();
-
-        result4->setSeq(1000);
-
-        /// callback to precompiled
-        std::promise<ExecutionMessage::UniquePtr> executePromise5;
-        executor->dmcExecuteTransaction(std::move(result4),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise5.set_value(std::move(result));
-            });
-        auto result5 = executePromise5.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result5->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result5;
+        return result;
     };
 
     ExecutionMessage::UniquePtr modifyMethodAuth(protocol::BlockNumber _number, int _contextId,
@@ -504,7 +440,8 @@ public:
         bytes fun = codec->encodeWithSig(helloMethod);
         auto func = toString32(h256(fun, FixedBytes<32>::AlignLeft));
         bytes in = codec->encodeWithSig(authMethod, _path, func, _account);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
@@ -523,65 +460,21 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result = executePromise.get_future().get();
 
-        result->setSeq(1001);
-
-        /// internal call get admin
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-
-        /// callback to precompiled
-        result2->setSeq(1000);
-
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
-        result3->setSeq(1002);
-
-        /// internal call set contract auth type
-        std::promise<ExecutionMessage::UniquePtr> executePromise4;
-        executor->dmcExecuteTransaction(std::move(result3),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise4.set_value(std::move(result));
-            });
-        auto result4 = executePromise4.get_future().get();
-
-        result4->setSeq(1000);
-
-        /// callback to precompiled
-        std::promise<ExecutionMessage::UniquePtr> executePromise5;
-        executor->dmcExecuteTransaction(std::move(result4),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise5.set_value(std::move(result));
-            });
-        auto result5 = executePromise5.get_future().get();
-
         // call precompiled
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result5->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result->data().toBytes() == codec->encode(s256(_errorCode)));
         }
         commitBlock(_number);
 
-        return result5;
+        return result;
     };
 
     ExecutionMessage::UniquePtr getMethodAuth(protocol::BlockNumber _number, Address const& _path,
@@ -591,7 +484,8 @@ public:
         bytes fun = codec->encodeWithSig(helloMethod);
         auto func = toString32(h256(fun, FixedBytes<32>::AlignLeft));
         bytes in = codec->encodeWithSig("getMethodAuth(address,bytes4)", _path, func);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto hash = tx->hash();
         txpool->hash2Transaction[hash] = tx;
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
@@ -610,41 +504,20 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result1 = executePromise.get_future().get();
 
-        result1->setSeq(1001);
-
-        /// internal call
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result1),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-        /// internal callback
-        result2->setSeq(1000);
-
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result3->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result1->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result3;
+        return result1;
     };
 
     ExecutionMessage::UniquePtr checkMethodAuth(protocol::BlockNumber _number, Address const& _path,
@@ -654,7 +527,8 @@ public:
         bytes fun = codec->encodeWithSig(helloMethod);
         auto func = toString32(h256(fun, FixedBytes<32>::AlignLeft));
         bytes in = codec->encodeWithSig("checkMethodAuth(address,bytes4,address)", _path, func);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto hash = tx->hash();
         txpool->hash2Transaction[hash] = tx;
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
@@ -673,41 +547,20 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result1 = executePromise.get_future().get();
 
-        result1->setSeq(1001);
-
-        /// internal call
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result1),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-        /// internal callback
-        result2->setSeq(1000);
-
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result3->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result1->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result3;
+        return result1;
     };
 
     ExecutionMessage::UniquePtr resetAdmin(protocol::BlockNumber _number, int _contextId,
@@ -716,7 +569,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("resetAdmin(address,address)", _path, _newAdmin);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto newSender = Address("0000000000000000000000000000000000010001");
         auto wrongSender = Address("0000000000000000000000000000000000011111");
         tx->forceSender(_useWrongSender ? wrongSender.asBytes() : newSender.asBytes());
@@ -738,7 +592,7 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
@@ -751,34 +605,13 @@ public:
             return result1;
         }
 
-        result1->setSeq(1001);
-
-        /// internal call
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result1),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-
-        result2->setSeq(1000);
-        /// internal callback
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result3->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result1->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result3;
+        return result1;
     };
 
     ExecutionMessage::UniquePtr setContractStatus(
@@ -786,7 +619,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("setContractStatus(address,bool)", _path, _isFreeze);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
         auto params1 = std::make_unique<NativeExecutionMessage>();
@@ -804,64 +638,20 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result = executePromise.get_future().get();
 
-        result->setSeq(1001);
-
-        /// internal call get admin
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-
-        /// callback to precompiled
-        result2->setSeq(1000);
-
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
-        result3->setSeq(1002);
-
-        /// internal call set contract status
-        std::promise<ExecutionMessage::UniquePtr> executePromise4;
-        executor->dmcExecuteTransaction(std::move(result3),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise4.set_value(std::move(result));
-            });
-        auto result4 = executePromise4.get_future().get();
-
-        result4->setSeq(1000);
-
-        /// callback to precompiled
-        std::promise<ExecutionMessage::UniquePtr> executePromise5;
-        executor->dmcExecuteTransaction(std::move(result4),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise5.set_value(std::move(result));
-            });
-        auto result5 = executePromise5.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result5->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result5;
+        return result;
     };
 
     ExecutionMessage::UniquePtr setContractStatus32(protocol::BlockNumber _number,
@@ -870,7 +660,8 @@ public:
         nextBlock(_number, m_blockVersion);
         bytes in = codec->encodeWithSig(
             "setContractStatus(address,uint8)", _path, static_cast<uint8_t>(status));
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
         auto params1 = std::make_unique<NativeExecutionMessage>();
@@ -888,64 +679,20 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result = executePromise.get_future().get();
 
-        result->setSeq(1001);
-
-        /// internal call get admin
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-
-        /// callback to precompiled
-        result2->setSeq(1000);
-
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
-        result3->setSeq(1002);
-
-        /// internal call set contract status
-        std::promise<ExecutionMessage::UniquePtr> executePromise4;
-        executor->dmcExecuteTransaction(std::move(result3),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise4.set_value(std::move(result));
-            });
-        auto result4 = executePromise4.get_future().get();
-
-        result4->setSeq(1000);
-
-        /// callback to precompiled
-        std::promise<ExecutionMessage::UniquePtr> executePromise5;
-        executor->dmcExecuteTransaction(std::move(result4),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise5.set_value(std::move(result));
-            });
-        auto result5 = executePromise5.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result5->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result5;
+        return result;
     };
 
     ExecutionMessage::UniquePtr contractAvailable(
@@ -953,7 +700,8 @@ public:
     {
         nextBlock(_number, m_blockVersion);
         bytes in = codec->encodeWithSig("contractAvailable(address)", _path);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto hash = tx->hash();
         txpool->hash2Transaction.emplace(hash, tx);
         auto params1 = std::make_unique<NativeExecutionMessage>();
@@ -971,42 +719,20 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result = executePromise.get_future().get();
 
-        result->setSeq(1001);
-
-        /// internal call get contract status
-        std::promise<ExecutionMessage::UniquePtr> executePromise4;
-        executor->dmcExecuteTransaction(std::move(result),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise4.set_value(std::move(result));
-            });
-        auto result4 = executePromise4.get_future().get();
-
-        result4->setSeq(1000);
-
-        /// callback to precompiled
-        std::promise<ExecutionMessage::UniquePtr> executePromise5;
-        executor->dmcExecuteTransaction(std::move(result4),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise5.set_value(std::move(result));
-            });
-        auto result5 = executePromise5.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result5->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result5;
+        return result;
     };
 
     ExecutionMessage::UniquePtr getAdmin(
@@ -1014,7 +740,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("getAdmin(address)", _path);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto newSender = Address("0000000000000000000000000000000000010001");
         tx->forceSender(newSender.asBytes());
         auto hash = tx->hash();
@@ -1035,41 +762,20 @@ public:
 
         /// call precompiled
         std::promise<ExecutionMessage::UniquePtr> executePromise;
-        executor->dmcExecuteTransaction(std::move(params1),
+        executor->executeTransaction(std::move(params1),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise.set_value(std::move(result));
             });
         auto result1 = executePromise.get_future().get();
 
-        result1->setSeq(1001);
-
-        /// internal call
-        std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(result1),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise2.set_value(std::move(result));
-            });
-        auto result2 = executePromise2.get_future().get();
-        /// internal callback
-        result2->setSeq(1000);
-
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
         if (_errorCode != 0)
         {
-            BOOST_CHECK(result3->data().toBytes() == codec->encode(s256(_errorCode)));
+            BOOST_CHECK(result1->data().toBytes() == codec->encode(s256(_errorCode)));
         }
 
         commitBlock(_number);
-        return result3;
+        return result1;
     };
 
     ExecutionMessage::UniquePtr setDeployType(
@@ -1079,7 +785,8 @@ public:
         uint8_t type = (_authType == AuthType::WHITE_LIST_MODE) ? 1 : 2;
         auto t = toString32(h256(type));
         bytes in = codec->encodeWithSig("setDeployAuthType(uint8)", t);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto newSender = Address("0000000000000000000000000000000000010001");
         tx->forceSender(newSender.asBytes());
         auto hash = tx->hash();
@@ -1099,7 +806,7 @@ public:
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
@@ -1121,7 +828,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("deployType()");
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto newSender = Address("0000000000000000000000000000000000010001");
         tx->forceSender(newSender.asBytes());
         auto hash = tx->hash();
@@ -1141,7 +849,7 @@ public:
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
@@ -1163,7 +871,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("openDeployAuth(address)", _address);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto newSender = Address("0000000000000000000000000000000000010001");
         tx->forceSender(newSender.asBytes());
         auto hash = tx->hash();
@@ -1183,7 +892,7 @@ public:
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
@@ -1205,7 +914,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("closeDeployAuth(address)", _address);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto newSender = Address("0000000000000000000000000000000000010001");
         tx->forceSender(newSender.asBytes());
         auto hash = tx->hash();
@@ -1225,7 +935,7 @@ public:
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
@@ -1247,7 +957,8 @@ public:
     {
         nextBlock(_number);
         bytes in = codec->encodeWithSig("hasDeployAuth(address)", _address);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto newSender = Address("0000000000000000000000000000000000010001");
         tx->forceSender(newSender.asBytes());
         auto hash = tx->hash();
@@ -1267,7 +978,7 @@ public:
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
@@ -1289,7 +1000,8 @@ public:
     {
         nextBlock(_number, m_blockVersion);
         bytes in = codec->encodeWithSig("initAuth(string)", _address);
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
         auto hash = tx->hash();
         txpool->hash2Transaction[hash] = tx;
         sender = boost::algorithm::hex_lower(std::string(tx->sender()));
@@ -1597,7 +1309,8 @@ BOOST_AUTO_TEST_CASE(testResetAdmin)
                 getAdmin(_number++, 1000, Address("0x1234567890123456789012345678901234567890"));
             if (versionCompareTo(m_blockVersion, BlockVersion::V3_3_VERSION) >= 0)
             {
-                BOOST_CHECK(result->data().toBytes() == codec->encode(Address(std::string(EMPTY_ADDRESS))));
+                BOOST_CHECK(
+                    result->data().toBytes() == codec->encode(Address(std::string(EMPTY_ADDRESS))));
             }
             else
             {
@@ -1822,7 +1535,8 @@ BOOST_AUTO_TEST_CASE(testDeployCommitteeManagerAndCall)
         nextBlock(2);
         bytes in = codec->encodeWithSig("createUpdateGovernorProposal(address,uint32,uint256)",
             admin, codec::toString32(h256(uint32_t(2))), u256(2));
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
 
         Address _admin(admin);
         tx->forceSender(_admin.asBytes());
@@ -1845,33 +1559,12 @@ BOOST_AUTO_TEST_CASE(testDeployCommitteeManagerAndCall)
         params2->setType(NativeExecutionMessage::TXHASH);
 
         std::promise<ExecutionMessage::UniquePtr> executePromise2;
-        executor->dmcExecuteTransaction(std::move(params2),
+        executor->executeTransaction(std::move(params2),
             [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
                 BOOST_CHECK(!error);
                 executePromise2.set_value(std::move(result));
             });
         auto result2 = executePromise2.get_future().get();
-
-        // proposalManager.create
-        result2->setSeq(1001);
-        result2->setKeyLocks({});
-        std::promise<ExecutionMessage::UniquePtr> executePromise3;
-        executor->dmcExecuteTransaction(std::move(result2),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise3.set_value(std::move(result));
-            });
-        auto result3 = executePromise3.get_future().get();
-
-        //
-        result3->setSeq(1000);
-        std::promise<ExecutionMessage::UniquePtr> executePromise4;
-        executor->dmcExecuteTransaction(std::move(result3),
-            [&](bcos::Error::UniquePtr&& error, ExecutionMessage::UniquePtr&& result) {
-                BOOST_CHECK(!error);
-                executePromise4.set_value(std::move(result));
-            });
-        auto result4 = executePromise4.get_future().get();
 
         commitBlock(2);
     }
@@ -2100,7 +1793,8 @@ BOOST_AUTO_TEST_CASE(testInitAuth)
         nextBlock(_number);
         bytes in = codec->encodeWithSig("createUpdateGovernorProposal(address,uint32,uint256)",
             admin, codec::toString32(h256(uint32_t(2))), u256(2));
-        auto tx = fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
+        auto tx =
+            fakeTransaction(cryptoSuite, keyPair, "", in, std::to_string(101), 100001, "1", "1");
 
         Address _admin(admin);
         tx->forceSender(_admin.asBytes());

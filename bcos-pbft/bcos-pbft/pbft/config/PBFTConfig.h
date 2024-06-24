@@ -19,14 +19,16 @@
  * @date 2021-04-12
  */
 #pragma once
+#include "bcos-framework/consensus/StateMachineInterface.h"
+#include "bcos-framework/ledger/LedgerTypeDef.h"
 #include "bcos-pbft/core/ConsensusConfig.h"
-#include "bcos-pbft/framework/StateMachineInterface.h"
 #include "bcos-pbft/pbft/engine/PBFTTimer.h"
 #include "bcos-pbft/pbft/engine/Validator.h"
 #include "bcos-pbft/pbft/interfaces/PBFTCodecInterface.h"
 #include "bcos-pbft/pbft/interfaces/PBFTMessageFactory.h"
 #include "bcos-pbft/pbft/interfaces/PBFTStorage.h"
 #include "bcos-pbft/pbft/utilities/Common.h"
+#include "bcos-rpbft/rpbft/config/RPBFTConfigTools.h"
 #include <bcos-crypto/interfaces/crypto/CryptoSuite.h>
 #include <bcos-framework/front/FrontServiceInterface.h>
 #include <bcos-framework/sync/BlockSyncInterface.h>
@@ -42,7 +44,8 @@ public:
         std::shared_ptr<PBFTMessageFactory> _pbftMessageFactory,
         std::shared_ptr<PBFTCodecInterface> _codec, std::shared_ptr<ValidatorInterface> _validator,
         std::shared_ptr<bcos::front::FrontServiceInterface> _frontService,
-        StateMachineInterface::Ptr _stateMachine, PBFTStorage::Ptr _storage)
+        StateMachineInterface::Ptr _stateMachine, PBFTStorage::Ptr _storage,
+        bcos::protocol::BlockFactory::Ptr _blockFactory)
       : ConsensusConfig(std::move(_keyPair)),
         m_cryptoSuite(std::move(_cryptoSuite)),
         m_pbftMessageFactory(std::move(_pbftMessageFactory)),
@@ -51,7 +54,8 @@ public:
         m_frontService(std::move(_frontService)),
         m_stateMachine(std::move(_stateMachine)),
         m_storage(std::move(_storage)),
-        m_connectedNodeList(std::make_shared<bcos::crypto::NodeIDSet>())
+        m_connectedNodeList(std::make_shared<bcos::crypto::NodeIDSet>()),
+        m_blockFactory(std::move(_blockFactory))
     {
         m_timer = std::make_shared<PBFTTimer>(consensusTimeout(), "pbftTimer");
         // Note: the pullTxsTimeout must be smaller than consensusTimeout to fetch txs before
@@ -78,6 +82,14 @@ public:
         if (m_pullTxsTimer)
         {
             m_pullTxsTimer->destroy();
+        }
+        if (m_stateMachine)
+        {
+            m_stateMachine->stop();
+        }
+        if (m_storage)
+        {
+            m_storage->stop();
         }
     }
     virtual void resetConfig(
@@ -177,7 +189,7 @@ public:
     {
         m_toView.store(m_view);
         m_timer->resetChangeCycle();
-        m_timeoutState.store(false);
+        setTimeoutState(false);
     }
 
     uint64_t maxFaultyQuorum() const { return m_maxFaultyQuorum; }
@@ -194,12 +206,12 @@ public:
         return m_committedProposal->index() < _index;
     }
 
-    virtual void setTimeoutState(bool _timeoutState) { m_timeoutState = _timeoutState; }
+    virtual void setTimeoutState(bool _timeoutState) { m_timeoutState.store(_timeoutState); }
     virtual bool timeout() { return m_timeoutState; }
 
     virtual void resetTimeoutState(bool _incTimeout = true)
     {
-        m_timeoutState.store(true);
+        setTimeoutState(true);
         // update toView
         incToView(1);
         if (_incTimeout)
@@ -230,7 +242,7 @@ public:
             m_startRecovered.store(true);
         }
         // reset the timer when reach a new-view
-        m_timeoutState.store(false);
+        setTimeoutState(false);
         // reach new view, consensus time recovery to normal
         // NOTE: should not recover when reach new view
         // if all nodes reach new view, and set consensusTimeout to 3000
@@ -241,7 +253,7 @@ public:
         timer()->resetChangeCycle();
         setView(_view);
         setToView(_view);
-        m_timeoutState.store(false);
+        setTimeoutState(false);
     }
     virtual void setUnSealedTxsSize(size_t _unsealedTxsSize)
     {
@@ -273,7 +285,8 @@ public:
         m_sealProposalNotifier = std::move(_sealProposalNotifier);
     }
 
-    void registerStateNotifier(std::function<void(bcos::protocol::BlockNumber)> _stateNotifier)
+    void registerStateNotifier(
+        std::function<void(bcos::protocol::BlockNumber, crypto::HashType const&)> _stateNotifier)
     {
         m_stateNotifier = std::move(_stateNotifier);
     }
@@ -382,11 +395,23 @@ public:
     bcos::protocol::BlockNumber waitSealUntil() { return m_waitSealUntil; }
 
     void setMinSealTime(int64_t _minSealTime) noexcept { this->m_minSealTime = _minSealTime; }
+    void setPipeLineSize(int64_t _pipeSize) noexcept { this->m_waterMarkLimit = _pipeSize; }
 
     void registerTxsStatusSyncHandler(std::function<void()> const& _txsStatusSyncHandler)
     {
         m_txsStatusSyncHandler = _txsStatusSyncHandler;
     }
+
+    void setConsensusType(ledger::ConsensusType _type) { m_type = _type; }
+    ledger::ConsensusType consensusType() const noexcept { return m_type; }
+
+    bcos::protocol::BlockFactory::Ptr blockFactory() const noexcept { return m_blockFactory; }
+
+    void setRPBFTConfigTools(RPBFTConfigTools::Ptr _config)
+    {
+        m_rpbftConfigTools = std::move(_config);
+    }
+    virtual RPBFTConfigTools::Ptr rpbftConfigTools() const noexcept { return m_rpbftConfigTools; }
 
 protected:
     void updateQuorum() override;
@@ -421,7 +446,7 @@ protected:
     std::function<void(std::function<void(Error::Ptr)>)> m_sealerResetNotifier;
 
     // notify the sealer the latest blockNumber
-    std::function<void(bcos::protocol::BlockNumber)> m_stateNotifier;
+    std::function<void(bcos::protocol::BlockNumber, crypto::HashType const&)> m_stateNotifier;
     // the sync module notify the consensus module the new block
     std::function<void(bcos::ledger::LedgerConfig::Ptr, std::function<void(Error::Ptr)>)>
         m_newBlockNotifier;
@@ -446,6 +471,8 @@ protected:
     const unsigned c_networkTimeoutInterval = 1000;
     // state variable that identifies whether it has timed out
     std::atomic_bool m_timeoutState = {false};
+    std::atomic_bool m_startRecovered = {false};
+    bcos::ledger::ConsensusType m_type = bcos::ledger::ConsensusType::PBFT_TYPE;
 
     std::atomic<size_t> m_unsealedTxsSize = {0};
     // notify the sealer to reseal new block until m_waitResealUntil stable committed
@@ -458,13 +485,14 @@ protected:
 
     std::function<void()> m_fastViewChangeHandler;
 
-    std::atomic_bool m_startRecovered = {false};
-
     std::function<bool(bcos::crypto::NodeIDPtr)> m_faultyDiscriminator;
 
     mutable RecursiveMutex m_mutex;
 
     // handler to notify txs status and try to request txs from peers
     std::function<void()> m_txsStatusSyncHandler;
+
+    bcos::protocol::BlockFactory::Ptr m_blockFactory;
+    [[no_unique_address]] RPBFTConfigTools::Ptr m_rpbftConfigTools = nullptr;
 };
 }  // namespace bcos::consensus

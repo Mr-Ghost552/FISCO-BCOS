@@ -18,17 +18,15 @@
  * @author: yujiechen
  * @date 2021-06-10
  */
-#include <bcos-crypto/encrypt/HsmSM4Crypto.h>
-#include <bcos-crypto/signature/hsmSM2/HsmSM2Crypto.h>
-
-#include "bcos-crypto/hasher/OpenSSLHasher.h"
-#include "libinitializer/Common.h"
 #include "libinitializer/ProtocolInitializer.h"
+#include "libinitializer/Common.h"
 #include <bcos-crypto/encrypt/AESCrypto.h>
+#include <bcos-crypto/encrypt/HsmSM4Crypto.h>
 #include <bcos-crypto/encrypt/SM4Crypto.h>
 #include <bcos-crypto/hash/Keccak256.h>
 #include <bcos-crypto/hash/SM3.h>
 #include <bcos-crypto/signature/fastsm2/FastSM2Crypto.h>
+#include <bcos-crypto/signature/hsmSM2/HsmSM2Crypto.h>
 #include <bcos-crypto/signature/key/KeyFactoryImpl.h>
 #include <bcos-crypto/signature/secp256k1/Secp256k1Crypto.h>
 #include <bcos-security/bcos-security/DataEncryption.h>
@@ -106,7 +104,6 @@ void ProtocolInitializer::init(NodeConfig::Ptr _nodeConfig)
     m_cryptoSuite->setKeyFactory(m_keyFactory);
     auto txResultFactory = std::make_shared<TransactionSubmitResultFactoryImpl>();
     m_txResultFactory = txResultFactory;
-    txResultFactory->setCryptoSuite(m_cryptoSuite);
 
     INITIALIZER_LOG(INFO) << LOG_DESC("init blockFactory success");
 }

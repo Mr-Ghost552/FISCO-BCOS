@@ -18,6 +18,7 @@
  * @date 2021-07-28
  */
 #pragma once
+#include "bcos-boostssl/interfaces/MessageFace.h"
 #include "bcos-utilities/ObjectCounter.h"
 #include <bcos-boostssl/httpserver/Common.h>
 #include <bcos-boostssl/websocket/Common.h>
@@ -26,6 +27,7 @@
 #include <bcos-utilities/Common.h>
 #include <bcos-utilities/ThreadPool.h>
 #include <bcos-utilities/Timer.h>
+#include <oneapi/tbb/task_group.h>
 #include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core.hpp>
@@ -36,12 +38,9 @@
 #include <queue>
 #include <shared_mutex>
 #include <unordered_map>
+#include <utility>
 
-namespace bcos
-{
-namespace boostssl
-{
-namespace ws
+namespace bcos::boostssl::ws
 {
 class WsService;
 // The websocket session for connection
@@ -53,9 +52,12 @@ public:
     using Ptrs = std::vector<std::shared_ptr<WsSession>>;
 
 public:
-    WsSession(std::string _moduleName = "DEFAULT");
+    explicit WsSession(tbb::task_group& taskGroup, std::string _moduleName = "DEFAULT");
 
-    virtual ~WsSession() { WEBSOCKET_SESSION(INFO) << LOG_KV("[DELOBJ][WSSESSION]", this); }
+    virtual ~WsSession() noexcept
+    {
+        WEBSOCKET_SESSION(INFO) << LOG_KV("[DELOBJ][WSSESSION]", this);
+    }
 
     void drop(uint32_t _reason);
 
@@ -66,7 +68,6 @@ public:
     void startAsServer(bcos::boostssl::http::HttpRequest _httpRequest);
 
     virtual void onMessage(bcos::boostssl::MessageFace::Ptr _message);
-
 
     virtual bool isConnected()
     {
@@ -86,41 +87,32 @@ public:
     std::string endPoint() const { return m_endPoint; }
     void setEndPoint(const std::string& _endPoint) { m_endPoint = _endPoint; }
 
-    std::string connectedEndPoint() const { return m_connectedEndPoint; }
-    void setConnectedEndPoint(const std::string& _connectedEndPoint)
+    void setConnectHandler(WsConnectHandler _connectHandler)
     {
-        m_connectedEndPoint = _connectedEndPoint;
+        m_connectHandler = std::move(_connectHandler);
     }
-
-    void setConnectHandler(WsConnectHandler _connectHandler) { m_connectHandler = _connectHandler; }
     WsConnectHandler connectHandler() { return m_connectHandler; }
 
     void setDisconnectHandler(WsDisconnectHandler _disconnectHandler)
     {
-        m_disconnectHandler = _disconnectHandler;
+        m_disconnectHandler = std::move(_disconnectHandler);
     }
     WsDisconnectHandler disconnectHandler() { return m_disconnectHandler; }
 
     void setRecvMessageHandler(WsRecvMessageHandler _recvMessageHandler)
     {
-        m_recvMessageHandler = _recvMessageHandler;
+        m_recvMessageHandler = std::move(_recvMessageHandler);
     }
     const WsRecvMessageHandler& recvMessageHandler() { return m_recvMessageHandler; }
 
     std::shared_ptr<MessageFaceFactory> messageFactory() { return m_messageFactory; }
     void setMessageFactory(std::shared_ptr<MessageFaceFactory> _messageFactory)
     {
-        m_messageFactory = _messageFactory;
+        m_messageFactory = std::move(_messageFactory);
     }
 
     std::shared_ptr<boost::asio::io_context> ioc() const { return m_ioc; }
-    void setIoc(std::shared_ptr<boost::asio::io_context> _ioc) { m_ioc = _ioc; }
-
-    std::shared_ptr<bcos::ThreadPool> threadPool() const { return m_threadPool; }
-    void setThreadPool(std::shared_ptr<bcos::ThreadPool> _threadPool)
-    {
-        m_threadPool = _threadPool;
-    }
+    void setIoc(std::shared_ptr<boost::asio::io_context> _ioc) { m_ioc = std::move(_ioc); }
 
     void setVersion(uint16_t _version) { m_version.store(_version); }
     uint16_t version() const { return m_version.load(); }
@@ -128,7 +120,7 @@ public:
     WsStreamDelegate::Ptr wsStreamDelegate() { return m_wsStreamDelegate; }
     void setWsStreamDelegate(WsStreamDelegate::Ptr _wsStreamDelegate)
     {
-        m_wsStreamDelegate = _wsStreamDelegate;
+        m_wsStreamDelegate = std::move(_wsStreamDelegate);
     }
 
     boost::beast::flat_buffer& buffer() { return m_buffer; }
@@ -142,17 +134,23 @@ public:
 
     std::size_t writeQueueSize()
     {
-        bcos::ReadGuard lockGuard(x_writeQueue);
+        bcos::Guard lockGuard(x_writeQueue);
         return m_writeQueue.size();
     }
 
+    std::size_t callbackQueueSize()
+    {
+        bcos::Guard lockGuard(x_callback);
+        return m_callbacks.size();
+    }
+
     std::string nodeId() { return m_nodeId; }
-    void setNodeId(std::string _nodeId) { m_nodeId = _nodeId; }
+    void setNodeId(std::string _nodeId) { m_nodeId = std::move(_nodeId); }
 
     std::string moduleName() { return m_moduleName; }
-    void setModuleName(std::string _moduleName) { m_moduleName = _moduleName; }
+    void setModuleName(std::string _moduleName) { m_moduleName = std::move(_moduleName); }
 
-    bool needCheckRspPacket() { return m_needCheckRspPacket; }
+    bool needCheckRspPacket() const { return m_needCheckRspPacket; }
     void setNeedCheckRspPacket(bool _needCheckRespPacket)
     {
         m_needCheckRspPacket = _needCheckRespPacket;
@@ -166,8 +164,8 @@ public:
         std::shared_ptr<boost::asio::deadline_timer> timer;
     };
     virtual void addRespCallback(const std::string& _seq, CallBack::Ptr _callback);
-    CallBack::Ptr getAndRemoveRespCallback(const std::string& _seq, bool _remove = true,
-        std::shared_ptr<MessageFace> _message = nullptr);
+    CallBack::Ptr getAndRemoveRespCallback(
+        const std::string& _seq, std::shared_ptr<MessageFace> _message = nullptr);
     virtual void onRespTimeout(const boost::system::error_code& _error, const std::string& _seq);
 
     virtual void onWsAccept(boost::beast::error_code _ec);
@@ -187,7 +185,8 @@ public:
     };
 
 protected:
-    // flag for message that need to check respond packet like p2pmessage
+    tbb::task_group& m_taskGroup;
+    // flag for message that need to check respond packet like p2p message
     bool m_needCheckRspPacket = false;
     //
     std::atomic_bool m_isDrop = false;
@@ -199,7 +198,6 @@ protected:
     boost::beast::flat_buffer m_buffer;
 
     std::string m_endPoint;
-    std::string m_connectedEndPoint;
     std::string m_nodeId;
 
     //
@@ -210,7 +208,7 @@ protected:
     //
     WsStreamDelegate::Ptr m_wsStreamDelegate;
     // callbacks
-    mutable bcos::SharedMutex x_callback;
+    mutable bcos::Mutex x_callback;
     std::unordered_map<std::string, CallBack::Ptr> m_callbacks;
 
     // callback handler
@@ -221,11 +219,12 @@ protected:
     // message factory
     std::shared_ptr<MessageFaceFactory> m_messageFactory;
     // thread pool
-    std::shared_ptr<bcos::ThreadPool> m_threadPool;
+    // std::shared_ptr<bcos::ThreadPool> m_threadPool;
+
     // ioc
     std::shared_ptr<boost::asio::io_context> m_ioc;
     // send message queue
-    mutable bcos::SharedMutex x_writeQueue;
+    mutable bcos::Mutex x_writeQueue;
     std::priority_queue<std::shared_ptr<Message>> m_writeQueue;
     std::atomic_bool m_writing = {false};
 };
@@ -238,13 +237,11 @@ public:
     virtual ~WsSessionFactory() = default;
 
 public:
-    virtual WsSession::Ptr createSession(std::string _moduleName)
+    virtual WsSession::Ptr createSession(tbb::task_group& taskGroup, std::string _moduleName)
     {
-        auto session = std::make_shared<WsSession>(_moduleName);
+        auto session = std::make_shared<WsSession>(taskGroup, _moduleName);
         return session;
     }
 };
 
-}  // namespace ws
-}  // namespace boostssl
-}  // namespace bcos
+}  // namespace bcos::boostssl::ws

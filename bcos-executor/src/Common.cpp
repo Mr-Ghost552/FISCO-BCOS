@@ -116,4 +116,45 @@ bytes getComponentBytes(size_t index, const std::string& typeName, const bytesCo
     }
     return {data.begin() + indexOffset, data.begin() + indexOffset + slotSize};
 }
+evmc_address unhexAddress(std::string_view view)
+{
+    if (view.empty())
+    {
+        return {};
+    }
+    if (view.starts_with("0x"))
+    {
+        view = view.substr(2);
+    }
+    evmc_address address;
+    if (view.empty())
+    {
+        std::uninitialized_fill(address.bytes, address.bytes + sizeof(address.bytes), 0);
+    }
+    else
+    {
+        boost::algorithm::unhex(view, address.bytes);
+    }
+    return address;
+}
+std::string addressBytesStr2HexString(std::string_view receiveAddressBytes)
+{
+    std::string strAddress;
+    strAddress.reserve(receiveAddressBytes.size() * 2);
+    boost::algorithm::hex_lower(
+        receiveAddressBytes.begin(), receiveAddressBytes.end(), std::back_inserter(strAddress));
+    return strAddress;
+}
+std::string address2HexString(const evmc_address& address)
+{
+    auto receiveAddressBytes = fromEvmC(address);
+    return addressBytesStr2HexString(receiveAddressBytes);
+}
+std::array<char, sizeof(evmc_address) * 2> address2FixedArray(const evmc_address& address)
+{
+    std::array<char, sizeof(evmc_address) * 2> array;
+    auto receiveAddressBytes = fromEvmC(address);
+    boost::algorithm::hex_lower(receiveAddressBytes, array.data());
+    return array;
+}
 }  // namespace bcos

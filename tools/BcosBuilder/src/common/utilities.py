@@ -37,7 +37,7 @@ class ServiceInfo:
     executor_name = "executor"
     scheduler_name = "scheduler"
     txpool_name = "txpool"
-    
+
     max_node_service = "BcosMaxNodeService"
     max_node_service_obj = single_node_obj_name_list
     executor_service = "BcosExecutorService"
@@ -99,7 +99,7 @@ class CommandInfo:
     network_add_vxlan = "add-vxlan"
     download_binary = "download_binary"
     download_type = ["cdn", "git"]
-    default_binary_version = "v3.3.0"
+    default_binary_version = "v3.8.0"
     command_list = [gen_config, upload, deploy,
                     upgrade, undeploy, expand, start, stop]
     service_command_list_str = ', '.join(command_list)
@@ -112,7 +112,7 @@ class CommandInfo:
         gen_config: "gen_executor_config", expand: "expand_executors"}
     service_command_impl = {gen_config: "gen_service_config", upload: "upload_service", deploy: "deploy_service",
                             upgrade: "upgrade_service", undeploy: "delete_service", start: "start_service", stop: "stop_service", expand: "expand_service"}
-    
+
     build_package_parser_name = "build"
     build_command_type_list = ["rpc", "gateway", "node", "all"]
     build_command_type_list_str = ', '.join(build_command_type_list)
@@ -269,6 +269,16 @@ def execute_ansible_with_monitor_command(start_scripts_path, deploy_ip):
                   start_scripts_path)
         sys.exit(-1)
     return True
+
+
+def get_hsm_nodeid(hsm_pem_file_path):
+    obtain_hsm_nodeid_cmd = "bash %s -c %s -p %s" % (
+        ServiceInfo.cert_generationscript_path, "get_hsm_nodeid", hsm_pem_file_path)
+    (ret, output) = execute_command_and_getoutput(obtain_hsm_nodeid_cmd)
+    if ret is False:
+        log_error("%s failed exec" % obtain_hsm_nodeid_cmd)
+        sys.exit(-1)
+    return (ret, output)
 
 
 def generate_private_key(sm_type, outputdir):

@@ -21,7 +21,9 @@
 #pragma once
 #include "Exceptions.h"
 #include "bcos-framework/consensus/ConsensusNodeInterface.h"
+#include "bcos-framework/ledger/GenesisConfig.h"
 #include "bcos-framework/ledger/LedgerConfig.h"
+#include "bcos-tool/VersionConverter.h"
 #include <bcos-crypto/interfaces/crypto/KeyFactory.h>
 #include <bcos-framework/Common.h>
 #include <bcos-framework/protocol/Protocol.h>
@@ -42,6 +44,7 @@ public:
     constexpr static ssize_t DEFAULT_MIN_CONSENSUS_TIME_MS = 3000;
     constexpr static ssize_t DEFAULT_MIN_LEASE_TTL_SECONDS = 3;
     constexpr static ssize_t DEFAULT_MAX_SEAL_TIME_MS = 600000;
+    constexpr static ssize_t DEFAULT_PIPELINE_SIZE = 50;
 
     using Ptr = std::shared_ptr<NodeConfig>;
     NodeConfig() : m_ledgerConfig(std::make_shared<bcos::ledger::LedgerConfig>()) {}
@@ -102,10 +105,11 @@ public:
     size_t notifyWorkerNum() const { return m_notifyWorkerNum; }
     size_t verifierWorkerNum() const { return m_verifierWorkerNum; }
     int64_t txsExpirationTime() const { return m_txsExpirationTime; }
+    bool checkBlockLimit() const { return m_checkBlockLimit; }
 
-    bool smCryptoType() const { return m_smCryptoType; }
-    std::string const& chainId() const { return m_chainId; }
-    std::string const& groupId() const { return m_groupId; }
+    bool smCryptoType() const { return m_genesisConfig.m_smCrypto; }
+    std::string const& chainId() const { return m_genesisConfig.m_chainID; }
+    std::string const& groupId() const { return m_genesisConfig.m_groupID; }
     size_t blockLimit() const { return m_blockLimit; }
 
     std::string const& privateKeyPath() const { return m_privateKeyPath; }
@@ -116,7 +120,9 @@ public:
     std::string const& password() const { return m_password; }
 
     size_t minSealTime() const { return m_minSealTime; }
+    bool allowFreeNodeSync() const { return m_allowFreeNode; }
     size_t checkPointTimeoutInterval() const { return m_checkPointTimeoutInterval; }
+    size_t pipelineSize() const { return m_pipelineSize; }
 
     std::string const& storagePath() const { return m_storagePath; }
     std::string const& storageType() const { return m_storageType; }
@@ -124,6 +130,10 @@ public:
     int maxWriteBufferNumber() const { return m_maxWriteBufferNumber; }
     bool enableStatistics() const { return m_enableDBStatistics; }
     int maxBackgroundJobs() const { return m_maxBackgroundJobs; }
+    size_t writeBufferSize() const { return m_writeBufferSize; }
+    int minWriteBufferNumberToMerge() const { return m_minWriteBufferNumberToMerge; }
+    size_t blockCacheSize() const { return m_blockCacheSize; }
+    bool enableRocksDBBlob() const { return m_enableRocksDBBlob; }
     std::vector<std::string> const& pdAddrs() const { return m_pd_addrs; }
     std::string const& pdCaPath() const { return m_pdCaPath; }
     std::string const& pdCertPath() const { return m_pdCertPath; }
@@ -138,16 +148,19 @@ public:
 
     bcos::ledger::LedgerConfig::Ptr ledgerConfig() { return m_ledgerConfig; }
 
-    std::string const& consensusType() const { return m_consensusType; }
-    size_t txGasLimit() const { return m_txGasLimit; }
+    std::string const& consensusType() const { return m_genesisConfig.m_consensusType; }
+    size_t txGasLimit() const { return m_genesisConfig.m_txGasLimit; }
     std::string const& genesisData() const { return m_genesisData; }
 
-    bool isWasm() const { return m_isWasm; }
-    bool isAuthCheck() const { return m_isAuthCheck; }
-    bool isSerialExecute() const { return m_isSerialExecute; }
+    std::int64_t epochSealerNum() const { return m_genesisConfig.m_epochSealerNum; }
+    std::int64_t epochBlockNum() const { return m_genesisConfig.m_epochBlockNum; }
+
+    bool isWasm() const { return m_genesisConfig.m_isWasm; }
+    bool isAuthCheck() const { return m_genesisConfig.m_isAuthCheck; }
+    bool isSerialExecute() const { return m_genesisConfig.m_isSerialExecute; }
     size_t vmCacheSize() const { return m_vmCacheSize; }
 
-    std::string const& authAdminAddress() const { return m_authAdminAddress; }
+    std::string const& authAdminAddress() const { return m_genesisConfig.m_authAdminAccount; }
 
     std::string const& rpcServiceName() const { return m_rpcServiceName; }
     std::string const& gatewayServiceName() const { return m_gatewayServiceName; }
@@ -158,10 +171,8 @@ public:
 
     std::string const& nodeName() const { return m_nodeName; }
 
-    std::string getDefaultServiceName(std::string const& _nodeName, std::string const& _serviceName)
-    {
-        return m_chainId + "." + _nodeName + _serviceName;
-    }
+    std::string getDefaultServiceName(
+        std::string const& _nodeName, std::string const& _serviceName) const;
 
     // the rpc configurations
     const std::string& rpcListenIP() const { return m_rpcListenIP; }
@@ -208,8 +219,13 @@ public:
     bool enableLRUCacheStorage() const { return m_enableLRUCacheStorage; }
     ssize_t cacheSize() const { return m_cacheSize; }
 
-    uint32_t compatibilityVersion() const { return m_compatibilityVersion; }
-    std::string const& compatibilityVersionStr() const { return m_compatibilityVersionStr; }
+    uint32_t compatibilityVersion() const { return m_genesisConfig.m_compatibilityVersion; }
+    std::string compatibilityVersionStr() const
+    {
+        std::stringstream ss;
+        ss << (bcos::protocol::BlockVersion)m_genesisConfig.m_compatibilityVersion;
+        return ss.str();
+    }
 
     std::string const& memberID() const { return m_memberID; }
     unsigned leaseTTL() const { return m_leaseTTL; }
@@ -221,6 +237,10 @@ public:
     unsigned short storageSecurityKeyCenterPort() const { return m_storageSecurityKeyCenterPort; }
     std::string storageSecurityCipherDataKey() const { return m_storageSecurityCipherDataKey; }
 
+    bool enableSendBlockStatusByTree() const { return m_enableSendBlockStatusByTree; }
+    bool enableSendTxByTree() const { return m_enableSendTxByTree; }
+    std::int64_t treeWidth() const { return m_treeWidth; }
+
     int sendTxTimeout() const { return m_sendTxTimeout; }
 
     bool withoutTarsFramework() const { return m_withoutTarsFramework; }
@@ -231,6 +251,28 @@ public:
     void getTarsClientProxyEndpoints(
         const std::string& _clientPrx, std::vector<tars::TC_Endpoint>& _endPoints);
 
+    bool enableBaselineScheduler() const { return m_enableBaselineScheduler; }
+    struct BaselineSchedulerConfig
+    {
+        bool parallel = false;
+        int chunkSize = 0;
+        int maxThread = 0;
+    };
+    BaselineSchedulerConfig const& baselineSchedulerConfig() const
+    {
+        return m_baselineSchedulerConfig;
+    }
+
+    struct TarsRPCConfig
+    {
+        std::string host;
+        uint16_t port = 0;
+        uint32_t threadCount = 0;
+    };
+    TarsRPCConfig const& tarsRPCConfig() const { return m_tarsRPCConfig; }
+
+    ledger::GenesisConfig const& genesisConfig() const;
+
 protected:
     virtual void loadChainConfig(boost::property_tree::ptree const& _pt, bool _enforceGroupId);
     virtual void loadRpcConfig(boost::property_tree::ptree const& _pt);
@@ -240,6 +282,7 @@ protected:
     virtual void loadSecurityConfig(boost::property_tree::ptree const& _pt);
     virtual void loadSealerConfig(boost::property_tree::ptree const& _pt);
     virtual void loadStorageSecurityConfig(boost::property_tree::ptree const& _pt);
+    virtual void loadSyncConfig(boost::property_tree::ptree const& _pt);
 
     virtual void loadStorageConfig(boost::property_tree::ptree const& _pt);
     virtual void loadConsensusConfig(boost::property_tree::ptree const& _pt);
@@ -261,13 +304,27 @@ protected:
         std::string const& _defaultValue = "", bool _require = true);
     void checkService(std::string const& _serviceType, std::string const& _serviceName);
 
-
 private:
+    void loadGenesisFeatures(boost::property_tree::ptree const& ptree);
+    void loadAlloc(boost::property_tree::ptree const& ptree)
+    {
+        if (auto node = ptree.get_child_optional("alloc"))
+        {
+            for (const auto& it : *node)
+            {
+                auto flag = it.first;
+                auto enableNumber = it.second.get_value<bool>();
+                m_genesisConfig.m_features.emplace_back(
+                    ledger::FeatureSet{.flag = ledger::Features::string2Flag(flag),
+                        .enable = static_cast<int>(enableNumber)});
+            }
+        }
+    }
+
     bcos::consensus::ConsensusNodeListPtr parseConsensusNodeList(
         boost::property_tree::ptree const& _pt, std::string const& _sectionName,
         std::string const& _subSectionName);
 
-    void generateGenesisData();
     virtual int64_t checkAndGetValue(boost::property_tree::ptree const& _pt,
         std::string const& _value, std::string const& _defaultValue);
 
@@ -279,17 +336,17 @@ private:
     size_t m_notifyWorkerNum;
     size_t m_verifierWorkerNum;
     int64_t m_txsExpirationTime;
+    bool m_checkBlockLimit = true;
     // TODO: the block sync module need some configurations?
 
     // chain configuration
-    bool m_smCryptoType;
-    std::string m_chainId;
-    std::string m_groupId;
     size_t m_blockLimit;
 
     // sealer configuration
     size_t m_minSealTime = 0;
+    bool m_allowFreeNode = false;
     size_t m_checkPointTimeoutInterval;
+    size_t m_pipelineSize = 50;
 
     // for security
     std::string m_privateKeyPath;
@@ -306,10 +363,11 @@ private:
     std::string m_storageSecurityCipherDataKey;
 
     // ledger configuration
-    std::string m_consensusType;
     bcos::ledger::LedgerConfig::Ptr m_ledgerConfig;
-    size_t m_txGasLimit;
     std::string m_genesisData;
+
+    // Genesis config
+    ledger::GenesisConfig m_genesisConfig;
 
     // storage configuration
     std::string m_storagePath;
@@ -319,9 +377,14 @@ private:
     std::string m_pdCaPath;
     std::string m_pdCertPath;
     std::string m_pdKeyPath;
-    int m_maxWriteBufferNumber = 3;
     bool m_enableDBStatistics = false;
+    int m_maxWriteBufferNumber = 3;
     int m_maxBackgroundJobs = 3;
+    size_t m_writeBufferSize = 64 << 21;
+    int m_minWriteBufferNumberToMerge = 2;
+    size_t m_blockCacheSize = 128 << 20;
+    bool m_enableRocksDBBlob = false;
+
     bool m_enableArchive = false;
     std::string m_archiveListenIP;
     uint16_t m_archiveListenPort = 0;
@@ -330,11 +393,10 @@ private:
     std::string m_stateDBName = "state";
 
     // executor config
-    bool m_isWasm = false;
-    bool m_isAuthCheck = false;
-    bool m_isSerialExecute = false;
     size_t m_vmCacheSize = 1024;
-    std::string m_authAdminAddress;
+    bool m_enableBaselineScheduler = false;
+    BaselineSchedulerConfig m_baselineSchedulerConfig;
+    TarsRPCConfig m_tarsRPCConfig;
 
     // Pro and Max versions run do not apply to tars admin site
     bool m_withoutTarsFramework = {false};
@@ -365,6 +427,11 @@ private:
     std::string m_p2pNodeDir;
     std::string m_p2pNodeFileName;
 
+    // config for sync
+    bool m_enableSendBlockStatusByTree = false;
+    bool m_enableSendTxByTree = false;
+    std::uint32_t m_treeWidth = 3;
+
     // config for cert
     std::string m_certPath;
 
@@ -380,8 +447,6 @@ private:
 
     bool m_enableLRUCacheStorage = true;
     ssize_t m_cacheSize = DEFAULT_CACHE_SIZE;  // 32MB for default
-    uint32_t m_compatibilityVersion;
-    std::string m_compatibilityVersionStr;
 
     // failover config
     std::string m_memberID;
@@ -394,4 +459,8 @@ private:
     int m_sendTxTimeout = -1;
     int64_t checkAndGetValue(const boost::property_tree::ptree& _pt, const std::string& _key);
 };
+
+std::string generateGenesisData(
+    ledger::GenesisConfig const& genesisConfig, ledger::LedgerConfig const& ledgerConfig);
+
 }  // namespace bcos::tool

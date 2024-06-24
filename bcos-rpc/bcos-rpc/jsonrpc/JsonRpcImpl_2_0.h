@@ -22,6 +22,7 @@
 #pragma once
 #include "bcos-protocol/TransactionStatus.h"
 #include "bcos-rpc/groupmgr/GroupManager.h"
+#include "bcos-rpc/validator/CallValidator.h"
 #include <bcos-boostssl/websocket/WsService.h>
 #include <bcos-framework/gateway/GatewayInterface.h>
 #include <bcos-rpc/jsonrpc/JsonRpcInterface.h>
@@ -46,6 +47,9 @@ public:
 
     void call(std::string_view _groupID, std::string_view _nodeName, std::string_view _to,
         std::string_view _data, RespFunc _respFunc) override;
+
+    void call(std::string_view _groupID, std::string_view _nodeName, std::string_view _to,
+        std::string_view _data, std::string_view sign, RespFunc _respFunc) override;
 
     void sendTransaction(std::string_view _groupID, std::string_view _nodeName,
         std::string_view _data, bool _requireProof, RespFunc _respFunc) override;
@@ -80,6 +84,9 @@ public:
 
     void getObserverList(
         std::string_view _groupID, std::string_view _nodeName, RespFunc _respFunc) override;
+
+    void getNodeListByType(std::string_view _groupID, std::string_view _nodeName,
+        std::string_view _nodeType, RespFunc _respFunc) override;
 
     void getPbftView(
         std::string_view _groupID, std::string_view _nodeName, RespFunc _respFunc) override;
@@ -154,6 +161,9 @@ private:
         bcos::gateway::GatewayInfo::Ptr _localP2pInfo, bcos::gateway::GatewayInfosPtr _peersInfo);
     void getGroupPeers(std::string_view _groupID, RespFunc _respFunc) override;
 
+    static void execCall(NodeService::Ptr nodeService, protocol::Transaction::Ptr _tx,
+        bcos::rpc::RespFunc _respFunc);
+
     // ms
     int m_sendTxTimeout = -1;
 
@@ -179,7 +189,7 @@ private:
     };
 };
 
-void toJsonResp(Json::Value& jResp, bcos::protocol::Transaction::ConstPtr _transactionPtr);
+void toJsonResp(Json::Value& jResp, bcos::protocol::Transaction const& transactionPtr);
 void toJsonResp(Json::Value& jResp, bcos::protocol::BlockHeader::Ptr _blockHeaderPtr);
 void toJsonResp(Json::Value& jResp, bcos::protocol::Block& block, bool _onlyTxHash);
 void toJsonResp(Json::Value& jResp, std::string_view _txHash, protocol::TransactionStatus status,

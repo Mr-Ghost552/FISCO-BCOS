@@ -150,14 +150,14 @@ StateStorageInterface::Ptr createKeyPageStorage(
 {
     auto keyPageIgnoreTables = getKeyPageIgnoreTables(blockVersion);
     return std::make_shared<bcos::storage::KeyPageStorage>(
-        backend, keyPageSize, blockVersion, keyPageIgnoreTables);
+        backend, false, keyPageSize, blockVersion, keyPageIgnoreTables);
 }
 
 void print(
     std::string_view tableName, std::string_view key, std::string_view value, bool hex = false)
 {
-    cout << "[tableName=" << tableName << "]"
-         << " [key=" << key << "] [value=" << (hex ? toHex(value) : value) << "]" << endl;
+    cout << "[tableName=" << tableName << "]" << " [key=" << key
+         << "] [value=" << (hex ? toHex(value) : value) << "]" << endl;
 }
 
 void writeKV(std::ofstream& output, std::string_view key, std::string_view value, bool hex = false)
@@ -254,8 +254,15 @@ TransactionalStorageInterface::Ptr createBackendStorage(
         }
         if (write)
         {
+            RocksDBOption option;
+            option.maxWriteBufferNumber = nodeConfig->maxWriteBufferNumber();
+            option.maxBackgroundJobs = nodeConfig->maxBackgroundJobs();
+            option.writeBufferSize = nodeConfig->writeBufferSize();
+            option.minWriteBufferNumberToMerge = nodeConfig->minWriteBufferNumberToMerge();
+            option.blockCacheSize = nodeConfig->blockCacheSize();
+
             storage = StorageInitializer::build(
-                nodeConfig->storagePath(), dataEncryption, nodeConfig->keyPageSize());
+                nodeConfig->storagePath(), option, dataEncryption, nodeConfig->keyPageSize());
         }
         else
         {
@@ -532,6 +539,8 @@ int main(int argc, const char* argv[])
         std::string value;
         if (hexEncoded)
         {
+            auto keyBytes = fromHexString(key);
+            key = std::string((char*)keyBytes->data(), keyBytes->size());
             auto tempBytes = fromHex(writeParameters[2]);
             value = std::string((char*)tempBytes.data(), tempBytes.size());
         }
@@ -753,7 +762,11 @@ int main(int argc, const char* argv[])
             if (params.count("stateSize") || params.count("S"))
             {  // calculate contract data size
                 auto* db = createSecondaryRocksDB(nodeConfig->storagePath(), secondaryPath);
+                getTableSize(db, storage::FS_ROOT);
                 getTableSize(db, storage::FS_APPS);
+                getTableSize(db, storage::FS_USER);
+                getTableSize(db, storage::FS_SYS_BIN);
+                getTableSize(db, storage::FS_USER_TABLE);
             }
         }
         else if (boost::iequals(nodeConfig->storageType(), "TiKV"))

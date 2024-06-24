@@ -2,7 +2,6 @@
 Checks:          'readability-*,clang-diagnostic-*,clang-analyzer-*,bugprone-*,cppcoreguidelines-*,modernize-*,performance-*,-modernize-use-trailing-return-type,-modernize-use-nodiscard'
 WarningsAsErrors: ''
 HeaderFilterRegex: ''
-AnalyzeTemporaryDtors: false
 FormatStyle:     none
 User:            more
 CheckOptions:
@@ -235,6 +234,6 @@ CheckOptions:
   - key:             llvm-else-after-return.WarnOnUnfixable
     value:           'false'
   - key:             readability-identifier-length.IgnoredVariableNames
-    value:           'it|ar|i|j|k|e|id|ss|os|tx|db'
+    value:           'it|ar|i|j|k|e|id|ss|os|tx|db|to'
 ...
 

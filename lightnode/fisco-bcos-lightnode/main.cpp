@@ -20,22 +20,31 @@
  * @date 2022-07-04
  */
 
-#include <bcos-tars-protocol/impl/TarsHashable.h>
-
 #include "RPCInitializer.h"
 #include "bcos-crypto/interfaces/crypto/CryptoSuite.h"
+#include "bcos-utilities/Common.h"
+#include "client/LedgerClientImpl.h"
+#include "client/P2PClientImpl.h"
+#include "client/SchedulerClientImpl.h"
+#include "client/TransactionPoolClientImpl.h"
 #include "libinitializer/CommandHelper.h"
 #include <bcos-framework/protocol/ProtocolTypeDef.h>
+#include <bcos-ledger/src/libledger/Ledger.h>
 #include <bcos-storage/StorageWrapperImpl.h>
+#include <bcos-tars-protocol/impl/TarsHashable.h>
 #include <bcos-tars-protocol/tars/Block.h>
 #include <bcos-task/Task.h>
 #include <bcos-utilities/BoostLogInitializer.h>
+#include <libinitializer/LedgerInitializer.h>
 #include <libinitializer/ProtocolInitializer.h>
 #include <boost/exception/diagnostic_information.hpp>
 #include <boost/throw_exception.hpp>
 #include <exception>
 #include <memory>
 #include <thread>
+struct StartLightNodeException : public bcos::error::Exception
+{
+};
 
 static auto newStorage(const std::string& path)
 {
@@ -50,7 +59,7 @@ static auto newStorage(const std::string& path)
     rocksdb::Status status = rocksdb::DB::Open(options, path, &rocksdb);
     if (!status.ok())
     {
-        BCOS_LOG(INFO) << LOG_DESC("open rocksDB failed") << LOG_KV("error", status.ToString());
+        BCOS_LOG(INFO) << LOG_DESC("open rocksDB failed") << LOG_KV("message", status.ToString());
         BOOST_THROW_EXCEPTION(std::runtime_error("open rocksDB failed, err:" + status.ToString()));
     }
     return std::make_shared<bcos::storage::RocksDBStorage>(
@@ -73,11 +82,11 @@ static auto startSyncerThread(bcos::concepts::ledger::Ledger auto fromLedger,
             {
                 auto& ledger = bcos::concepts::getRef(toLedger);
 
-                auto syncedBlock =
-                    ~ledger
-                         .template sync<std::remove_cvref_t<decltype(fromLedger)>, bcostars::Block>(
-                             fromLedger, true);
-                auto currentStatus = ~ledger.getStatus();
+                auto syncedBlock = bcos::task::syncWait(
+                    ledger
+                        .template sync<std::remove_cvref_t<decltype(fromLedger)>, bcostars::Block>(
+                            fromLedger, true));
+                auto currentStatus = bcos::task::syncWait(ledger.getStatus());
 
                 if (syncedBlock > 0)
                 {
@@ -126,8 +135,8 @@ static auto startSyncerThread(bcos::concepts::ledger::Ledger auto fromLedger,
 }
 
 
-void starLightnode(bcos::tool::NodeConfig::Ptr nodeConfig, auto ledger, auto front, auto gateway,
-    auto keyFactory, auto nodeID)
+void starLightnode(bcos::tool::NodeConfig::Ptr nodeConfig, auto ledger, auto nodeLedger, auto front,
+    auto gateway, auto keyFactory, auto nodeID)
 {
     LIGHTNODE_LOG(INFO) << "Init lightnode p2p client...";
     auto p2pClient = std::make_shared<bcos::p2p::P2PClientImpl>(
@@ -139,24 +148,36 @@ void starLightnode(bcos::tool::NodeConfig::Ptr nodeConfig, auto ledger, auto fro
         std::make_shared<bcos::transaction_pool::TransactionPoolClientImpl>(p2pClient);
     auto scheduler = std::make_shared<bcos::scheduler::SchedulerClientImpl>(p2pClient);
 
-    LIGHTNODE_LOG(INFO) << "Prepare genesis block...";
+    // check genesisBlock exists
     bcostars::Block genesisBlock;
-    genesisBlock.blockHeader.data.blockNumber = 0;
-    if (nodeConfig->compatibilityVersion() >=
-        static_cast<uint32_t>(bcos::protocol::BlockVersion::V3_1_VERSION))
+    try
     {
-        genesisBlock.blockHeader.data.version =
-            static_cast<decltype(genesisBlock.blockHeader.data.version)>(
-                nodeConfig->compatibilityVersion());
+        bcos::task::syncWait(ledger->checkGenesisBlock(std::move(genesisBlock)));
     }
-    bcos::concepts::bytebuffer::assignTo(
-        nodeConfig->genesisData(), genesisBlock.blockHeader.data.extraData);
-    ~ledger->setupGenesisBlock(std::move(genesisBlock));
+    catch (const std::exception& e)
+    {
+        LIGHTNODE_LOG(INFO) << "get genesis block failed, genesisBlock maybe not exist, prepare "
+                               "buildGenesisBlock, error:"
+                            << boost::diagnostic_information(e);
+        nodeLedger->buildGenesisBlock(nodeConfig->genesisConfig(), *nodeConfig->ledgerConfig());
+    }
+
 
     LIGHTNODE_LOG(INFO) << "Init lightnode rpc...";
     auto wsService = bcos::lightnode::initRPC(
         nodeConfig, nodeID, gateway, keyFactory, ledger, remoteLedger, transactionPool, scheduler);
-    wsService->start();
+    try
+    {
+        wsService->start();
+    }
+    catch (std::exception const& e)
+    {
+        std::cout << "[" << bcos::getCurrentDateTime() << "] ";
+        std::cout << "start fisco-bcos-lightnode failed, error:" << boost::diagnostic_information(e)
+                  << std::endl;
+        BOOST_THROW_EXCEPTION(StartLightNodeException{} << bcos::error::ErrorMessage{
+                                  "start lightnode failed, " + boost::diagnostic_information(e)});
+    }
 
     LIGHTNODE_LOG(INFO) << "Init lightnode block syner...";
     auto stopToken = std::make_shared<std::atomic_bool>(false);
@@ -193,13 +214,27 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] const char* argv[])
 
     auto front = std::make_shared<bcos::front::FrontService>();
     // gateway
-    bcos::gateway::GatewayFactory gatewayFactory(nodeConfig->chainId(), "local", nullptr);
-    auto gateway = gatewayFactory.buildGateway(configFile, true, nullptr, "localGateway");
-    auto protocolInfo = g_BCOSConfig.protocolInfo(bcos::protocol::ProtocolModuleID::GatewayService);
-    gateway->gatewayNodeManager()->registerNode(nodeConfig->groupId(),
-        protocolInitializer.keyPair()->publicKey(), bcos::protocol::NodeType::LIGHT_NODE, front,
-        protocolInfo);
-    gateway->start();
+    bcos::gateway::Gateway::Ptr gateway;
+    try
+    {
+        bcos::gateway::GatewayFactory gatewayFactory(nodeConfig->chainId(), "local", nullptr);
+        gateway = gatewayFactory.buildGateway(configFile, true, nullptr, "localGateway");
+        auto protocolInfo =
+            g_BCOSConfig.protocolInfo(bcos::protocol::ProtocolModuleID::GatewayService);
+        gateway->gatewayNodeManager()->registerNode(nodeConfig->groupId(),
+            protocolInitializer.keyPair()->publicKey(), bcos::protocol::NodeType::LIGHT_NODE, front,
+            protocolInfo);
+        gateway->start();
+    }
+    catch (std::exception const& e)
+    {
+        std::cout << "[" << bcos::getCurrentDateTime() << "] ";
+        std::cout << "start fisco-bcos-lightnode failed, error:" << boost::diagnostic_information(e)
+                  << std::endl;
+        BOOST_THROW_EXCEPTION(StartLightNodeException{} << bcos::error::ErrorMessage{
+                                  "start lightnode failed, " + boost::diagnostic_information(e)});
+    }
+
 
     // front
     front->setMessageFactory(std::make_shared<bcos::front::FrontMessageFactory>());
@@ -207,7 +242,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] const char* argv[])
     front->setNodeID(protocolInitializer.keyPair()->publicKey());
     front->setIoService(std::make_shared<boost::asio::io_service>());
     front->setGatewayInterface(gateway);
-    front->setThreadPool(std::make_shared<bcos::ThreadPool>("p2p", 1));
     front->registerModuleMessageDispatcher(bcos::protocol::BlockSync,
         [](const bcos::crypto::NodeIDPtr&, const std::string&, bcos::bytesConstRef) {});
     front->registerModuleMessageDispatcher(bcos::protocol::AMOP,
@@ -216,25 +250,36 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] const char* argv[])
 
     // local ledger
     auto storage = newStorage(nodeConfig->storagePath());
-    bcos::storage::StorageImpl storageWrapper(std::move(storage));
-
+    bcos::storage::StorageImpl storageWrapper(storage);
+    std::shared_ptr<bcos::ledger::Ledger> nodeLedger;
     if (nodeConfig->smCryptoType())
     {
-        auto localLedger = std::make_shared<bcos::ledger::LedgerImpl<
+        auto lightNodeLedger = std::make_shared<bcos::ledger::LedgerImpl<
             bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher, decltype(storageWrapper)>>(
-            std::move(storageWrapper), protocolInitializer.blockFactory(), storage);
+            bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, std::move(storageWrapper),
+            protocolInitializer.blockFactory(), storage);
+        nodeLedger = std::make_shared<bcos::ledger::LedgerImpl<
+            bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher, decltype(storageWrapper)>>(
+            bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, std::move(storageWrapper),
+            protocolInitializer.blockFactory(), storage);
 
         LIGHTNODE_LOG(INFO) << "start sm light node...";
-        starLightnode(nodeConfig, localLedger, front, gateway, keyFactory, nodeID);
+        starLightnode(nodeConfig, lightNodeLedger, nodeLedger, front, gateway, keyFactory, nodeID);
     }
     else
     {
-        auto localLedger = std::make_shared<bcos::ledger::LedgerImpl<
+        auto lightNodeLedger = std::make_shared<bcos::ledger::LedgerImpl<
             bcos::crypto::hasher::openssl::OpenSSL_Keccak256_Hasher, decltype(storageWrapper)>>(
-            std::move(storageWrapper), protocolInitializer.blockFactory(), storage);
+            bcos::crypto::hasher::openssl::OpenSSL_Keccak256_Hasher{}, std::move(storageWrapper),
+            protocolInitializer.blockFactory(), storage);
+
+        nodeLedger = std::make_shared<bcos::ledger::LedgerImpl<
+            bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher, decltype(storageWrapper)>>(
+            bcos::crypto::hasher::openssl::OpenSSL_SM3_Hasher{}, std::move(storageWrapper),
+            protocolInitializer.blockFactory(), storage);
 
         LIGHTNODE_LOG(INFO) << "start light node...";
-        starLightnode(nodeConfig, localLedger, front, gateway, keyFactory, nodeID);
+        starLightnode(nodeConfig, lightNodeLedger, nodeLedger, front, gateway, keyFactory, nodeID);
     }
 
     return 0;

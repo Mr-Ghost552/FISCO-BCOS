@@ -1,6 +1,6 @@
+#include "bcos-crypto/hasher/OpenSSLHasher.h"
 #include "bcos-framework/storage/StorageInterface.h"
 #include "bcos-table/src/StateStorage.h"
-#include "boost/filesystem.hpp"
 #include <bcos-storage/RocksDBStorage.h>
 #include <bcos-utilities/DataConvertUtility.h>
 #include <rocksdb/write_batch.h>
@@ -36,7 +36,7 @@ public:
     typedef std::shared_ptr<Header256Hash> Ptr;
     Header256Hash() = default;
     virtual ~Header256Hash(){};
-    bcos::crypto::HashType hash(bytesConstRef _data) override
+    bcos::crypto::HashType hash(bytesConstRef _data) const override
     {
         std::hash<std::string_view> hash;
         return bcos::crypto::HashType(
@@ -125,7 +125,7 @@ struct TestRocksDBStorageFixture
         auto storage = rocksDBStorage;
         size_t tableEntries = count;
         auto hashImpl = std::make_shared<Header256Hash>();
-        auto stateStorage = std::make_shared<bcos::storage::StateStorage>(storage);
+        auto stateStorage = std::make_shared<bcos::storage::StateStorage>(storage, false);
         auto testTable = stateStorage->openTable(testTableName);
         BOOST_CHECK_EQUAL(testTable.has_value(), true);
         for (size_t i = 0; i < tableEntries; ++i)
@@ -407,7 +407,7 @@ BOOST_AUTO_TEST_CASE(asyncPrepare)
     prepareTestTableData();
 
     auto hashImpl = std::make_shared<Header256Hash>();
-    auto storage = std::make_shared<bcos::storage::StateStorage>(rocksDBStorage);
+    auto storage = std::make_shared<bcos::storage::StateStorage>(rocksDBStorage, false);
     BOOST_CHECK(storage->createTable("table1", "value1,value2,value3"));
     BOOST_CHECK(storage->createTable("table2", "value1,value2,value3,value4,value5"));
 
@@ -594,7 +594,7 @@ BOOST_AUTO_TEST_CASE(writeReadDelete_1Table)
 
 BOOST_AUTO_TEST_CASE(commitAndCheck)
 {
-    auto initState = std::make_shared<StateStorage>(rocksDBStorage);
+    auto initState = std::make_shared<StateStorage>(rocksDBStorage, false);
 
     initState->asyncCreateTable(
         "test_table1", "value", [](Error::UniquePtr error, std::optional<Table> table) {
@@ -636,7 +636,7 @@ BOOST_AUTO_TEST_CASE(commitAndCheck)
 
     for (size_t i = 100; i < 1000; i += 100)
     {
-        auto state = std::make_shared<StateStorage>(rocksDBStorage);
+        auto state = std::make_shared<StateStorage>(rocksDBStorage, false);
 
         STORAGE_LOG(INFO) << "Expected: " << i;
         for (size_t keyIndex = 0; keyIndex < 100; ++keyIndex)

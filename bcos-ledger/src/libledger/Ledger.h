@@ -18,32 +18,32 @@
  * @date 2021-04-13
  */
 #pragma once
+#include "bcos-framework/ledger/GenesisConfig.h"
 #include "bcos-framework/ledger/LedgerInterface.h"
 #include "bcos-framework/ledger/LedgerTypeDef.h"
 #include "bcos-framework/protocol/BlockFactory.h"
-#include "bcos-framework/protocol/BlockHeaderFactory.h"
 #include "bcos-framework/protocol/ProtocolTypeDef.h"
-#include "bcos-framework/storage/Common.h"
 #include "bcos-framework/storage/StorageInterface.h"
 #include "utilities/Common.h"
+#include <bcos-tool/NodeConfig.h>
 #include <bcos-utilities/Common.h>
 #include <bcos-utilities/Exceptions.h>
 #include <bcos-utilities/ThreadPool.h>
-#include <utility>
 #include <boost/compute/detail/lru_cache.hpp>
+#include <utility>
 
 #define LEDGER_LOG(LEVEL) BCOS_LOG(LEVEL) << LOG_BADGE("LEDGER")
 
 namespace bcos::ledger
 {
-class Ledger : public LedgerInterface, public std::enable_shared_from_this<Ledger>
+class Ledger : public LedgerInterface
 {
 public:
-    using CacheType = boost::compute::detail::lru_cache<int64_t, std::shared_ptr<std::vector<h256>>>;
+    using CacheType =
+        boost::compute::detail::lru_cache<int64_t, std::shared_ptr<std::vector<h256>>>;
 
     Ledger(bcos::protocol::BlockFactory::Ptr _blockFactory,
-        bcos::storage::StorageInterface::Ptr _storage,
-        int merkleTreeCacheSize = 100)
+        bcos::storage::StorageInterface::Ptr _storage, int merkleTreeCacheSize = 100)
       : m_blockFactory(std::move(_blockFactory)),
         m_storage(std::move(_storage)),
         m_threadPool(std::make_shared<ThreadPool>("WriteReceipts", 1)),
@@ -54,15 +54,16 @@ public:
 
     ~Ledger() override = default;
 
-    void asyncPreStoreBlockTxs(bcos::protocol::TransactionsPtr _blockTxs,
+    void asyncPreStoreBlockTxs(bcos::protocol::ConstTransactionsPtr _blockTxs,
         bcos::protocol::Block::ConstPtr block,
         std::function<void(Error::UniquePtr&&)> _callback) override;
     void asyncPrewriteBlock(bcos::storage::StorageInterface::Ptr storage,
-        bcos::protocol::TransactionsPtr _blockTxs, bcos::protocol::Block::ConstPtr block,
-        std::function<void(Error::Ptr&&)> callback, bool writeTxsAndReceipts = true) override;
+        bcos::protocol::ConstTransactionsPtr _blockTxs, bcos::protocol::Block::ConstPtr block,
+        std::function<void(std::string, Error::Ptr&&)> callback,
+        bool writeTxsAndReceipts = true) override;
 
-    bcos::Error::Ptr storeTransactionsAndReceipts(
-        bcos::protocol::TransactionsPtr blockTxs, bcos::protocol::Block::ConstPtr block) override;
+    bcos::Error::Ptr storeTransactionsAndReceipts(bcos::protocol::ConstTransactionsPtr blockTxs,
+        bcos::protocol::Block::ConstPtr block) override;
 
     void asyncGetBlockDataByNumber(bcos::protocol::BlockNumber _blockNumber, int32_t _blockFlag,
         std::function<void(Error::Ptr, bcos::protocol::Block::Ptr)> _onGetBlock) override;
@@ -106,14 +107,10 @@ public:
         std::function<void(Error::Ptr&&, std::optional<bcos::storage::Entry>&&)> _callback)
         override;
 
-    /****** init ledger ******/
-    bool buildGenesisBlock(LedgerConfig::Ptr _ledgerConfig, size_t _gasLimit,
-        const std::string_view& _genesisData, std::string const& _compatibilityVersion,
-        bool isAuthCheck = false);
+    bool buildGenesisBlock(GenesisConfig const& genesis, ledger::LedgerConfig const& ledgerConfig);
 
     void asyncGetBlockTransactionHashes(bcos::protocol::BlockNumber blockNumber,
         std::function<void(Error::Ptr&&, std::vector<std::string>&&)> callback);
-
 
 private:
     Error::Ptr checkTableValid(Error::UniquePtr&& error,
@@ -154,7 +151,10 @@ private:
 
     std::tuple<bool, bcos::crypto::HashListPtr, std::shared_ptr<std::vector<bytesConstPtr>>>
     needStoreUnsavedTxs(
-        bcos::protocol::TransactionsPtr _blockTxs, bcos::protocol::Block::ConstPtr _block);
+        bcos::protocol::ConstTransactionsPtr _blockTxs, bcos::protocol::Block::ConstPtr _block);
+
+    bcos::consensus::ConsensusNodeListPtr selectWorkingSealer(
+        const bcos::ledger::LedgerConfig& _ledgerConfig, std::int64_t _epochSealerNum);
 
     bcos::protocol::BlockFactory::Ptr m_blockFactory;
     bcos::storage::StorageInterface::Ptr m_storage;
@@ -162,10 +162,10 @@ private:
     mutable RecursiveMutex m_mutex;
     std::shared_ptr<bcos::ThreadPool> m_threadPool;
 
-    //Maintain merkle trees of 100 blocks
+    // Maintain merkle trees of 100 blocks
     int m_merkleTreeCacheSize;
-    Mutex m_txMerkleMtx;
-    Mutex m_receiptMerkleMtx;
+    RecursiveMutex m_txMerkleMtx;
+    RecursiveMutex m_receiptMerkleMtx;
     CacheType m_txProofMerkleCache;
     CacheType m_receiptProofMerkleCache;
 };

@@ -22,7 +22,6 @@
 #include <bcos-crypto/interfaces/crypto/CryptoSuite.h>
 #include <bcos-utilities/FixedBytes.h>
 #include <gsl/span>
-#include <utility>
 
 namespace bcos::protocol
 {
@@ -38,20 +37,26 @@ public:
     virtual void decode(bytesConstRef _receiptData) = 0;
     virtual void encode(bytes& _encodedData) const = 0;
     virtual bcos::crypto::HashType hash() const = 0;
+    virtual void calculateHash(const crypto::Hash& hashImpl) = 0;
     virtual int32_t version() const = 0;
-    virtual u256 gasUsed() const = 0;
+    virtual bcos::u256 gasUsed() const = 0;
     virtual std::string_view contractAddress() const = 0;
     virtual int32_t status() const = 0;
-    virtual bytesConstRef output() const = 0;
+    virtual bcos::bytesConstRef output() const = 0;
     virtual gsl::span<const LogEntry> logEntries() const = 0;
-    virtual BlockNumber blockNumber() const = 0;
+    virtual protocol::BlockNumber blockNumber() const = 0;
+    virtual std::string_view effectiveGasPrice() const = 0;
+    virtual void setEffectiveGasPrice(std::string effectiveGasPrice) = 0;
 
     // additional information on transaction execution, no need to be involved in the hash
     // calculation
     virtual std::string const& message() const = 0;
     virtual void setMessage(std::string message) = 0;
+
+    virtual std::string toString() const { return {}; }
 };
 using Receipts = std::vector<TransactionReceipt::Ptr>;
 using ReceiptsPtr = std::shared_ptr<Receipts>;
 using ReceiptsConstPtr = std::shared_ptr<const Receipts>;
+
 }  // namespace bcos::protocol

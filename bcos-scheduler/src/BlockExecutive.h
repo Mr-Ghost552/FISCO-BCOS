@@ -1,18 +1,14 @@
 #pragma once
 
 #include "Executive.h"
-#include "ExecutorManager.h"
 #include "GraphKeyLocks.h"
 #include "bcos-framework/executor/ExecutionMessage.h"
 #include "bcos-framework/executor/ParallelTransactionExecutorInterface.h"
 #include "bcos-framework/protocol/Block.h"
 #include "bcos-framework/protocol/BlockHeader.h"
-#include "bcos-framework/protocol/BlockHeaderFactory.h"
 #include "bcos-framework/protocol/ProtocolTypeDef.h"
-#include "bcos-framework/protocol/TransactionMetaData.h"
-#include "bcos-framework/protocol/TransactionReceiptFactory.h"
+#include "bcos-framework/protocol/TransactionSubmitResultFactory.h"
 #include "bcos-framework/storage/StorageInterface.h"
-#include "bcos-protocol/TransactionSubmitResultFactoryImpl.h"
 #include <bcos-crypto/interfaces/crypto/CommonType.h>
 #include <bcos-framework/protocol/BlockFactory.h>
 #include <bcos-framework/txpool/TxPoolInterface.h>
@@ -21,11 +17,6 @@
 #include <boost/iterator/iterator_categories.hpp>
 #include <boost/range/any_range.hpp>
 #include <chrono>
-#include <forward_list>
-#include <mutex>
-#include <ratio>
-#include <stack>
-#include <thread>
 #include <utility>
 
 namespace bcos::scheduler
@@ -50,13 +41,15 @@ public:
         size_t startContextID,
         bcos::protocol::TransactionSubmitResultFactory::Ptr transactionSubmitResultFactory,
         bool staticCall, bcos::protocol::BlockFactory::Ptr _blockFactory,
-        bcos::txpool::TxPoolInterface::Ptr _txPool, uint64_t _gasLimit, bool _syncBlock)
+        bcos::txpool::TxPoolInterface::Ptr _txPool, uint64_t _gasLimit, std::string& _gasPrice,
+        bool _syncBlock)
       : BlockExecutive(std::move(block), scheduler, startContextID,
             std::move(transactionSubmitResultFactory), staticCall, std::move(_blockFactory),
             std::move(_txPool))
     {
         m_syncBlock = _syncBlock;
         m_gasLimit = _gasLimit;
+        m_gasPrice = _gasPrice;
     }
 
     BlockExecutive(const BlockExecutive&) = delete;
@@ -170,7 +163,7 @@ protected:
 
     virtual void serialPrepareExecutor();
 
-    bcos::protocol::TransactionsPtr fetchBlockTxsFromTxPool(
+    bcos::protocol::ConstTransactionsPtr fetchBlockTxsFromTxPool(
         bcos::protocol::Block::Ptr block, bcos::txpool::TxPoolInterface::Ptr txPool);
     std::string preprocessAddress(const std::string_view& address);
 
@@ -191,7 +184,7 @@ protected:
 
     bcos::protocol::Block::Ptr m_block;
     bcos::protocol::BlockHeader::ConstPtr m_blockHeader;
-    bcos::protocol::TransactionsPtr m_blockTxs;
+    bcos::protocol::ConstTransactionsPtr m_blockTxs;
 
     bcos::protocol::BlockHeader::Ptr m_result;
     SchedulerImpl* m_scheduler;
@@ -202,6 +195,7 @@ protected:
     bcos::txpool::TxPoolInterface::Ptr m_txPool;
 
     size_t m_gasLimit = TRANSACTION_GAS;
+    std::string m_gasPrice = std::string("0x0");
     std::atomic_bool m_isSysBlock = false;
 
     bool m_staticCall = false;

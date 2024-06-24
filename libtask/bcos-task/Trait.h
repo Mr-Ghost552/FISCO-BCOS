@@ -1,25 +1,17 @@
 #pragma once
 
 #include <type_traits>
+#include <utility>
 
 namespace bcos::task
 {
 
 template <class Task>
-concept HasADLCoAwait = requires(Task&& task)
-{
-    operator co_await(task);
-};
+concept HasADLCoAwait = requires(Task task) { operator co_await(task); };
 template <class Task>
-concept HasMemberCoAwait = requires(Task&& task)
-{
-    task.operator co_await();
-};
+concept HasMemberCoAwait = requires(Task task) { task.operator co_await(); };
 template <class Awaitable>
-concept IsAwaitable = requires(Awaitable&& awaitable)
-{
-    awaitable.await_resume();
-};
+concept HasAwaitable = requires(Awaitable awaitable) { awaitable.await_resume(); };
 
 auto getAwaitable(auto&& task)
 {
@@ -32,17 +24,22 @@ auto getAwaitable(auto&& task)
     {
         return task.operator co_await();
     }
-    else if constexpr (IsAwaitable<TaskType>)
+    else if constexpr (HasAwaitable<TaskType>)
     {
-        return task;
+        return std::forward<decltype(task)>(task);
     }
     else
     {
         static_assert(!sizeof(TaskType*), "Not a valid task or an await_transform task!");
     }
 }
+
+template <class Awaitable>
+concept IsAwaitable =
+    HasADLCoAwait<Awaitable> || HasMemberCoAwait<Awaitable> || HasAwaitable<Awaitable>;
+
 template <class Task>
-requires HasADLCoAwait<Task> || HasMemberCoAwait<Task> || IsAwaitable<Task>
+    requires IsAwaitable<Task>
 struct AwaitableTrait
 {
     using type = std::remove_cvref_t<decltype(getAwaitable(std::declval<Task>()))>;

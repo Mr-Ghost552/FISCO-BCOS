@@ -17,103 +17,66 @@
  * @file VMInstance.h
  * @author: xingqiangbai
  * @date: 2021-05-24
+ * @author: ancelmo
+ * @date: 2023-3-3
  */
 
 #pragma once
-#include "../Common.h"
+#include "../EVMCResult.h"
 #include <bcos-utilities/Common.h>
+#include <bcos-utilities/Overloaded.h>
 #include <evmc/evmc.h>
+#include <evmone/evmone.h>
+#include <evmone/advanced_analysis.hpp>
+#include <evmone/advanced_execution.hpp>
+#include <evmone/baseline.hpp>
+#include <evmone/vm.hpp>
 
 namespace bcos::transaction_executor
 {
 
-struct EVMCResult
+struct ReleaseEVMC
 {
-public:
-    EVMCResult() { m_evmcResult.release = nullptr; }
-    ~EVMCResult() noexcept
-    {
-        if (m_evmcResult.release != nullptr)
-        {
-            m_evmcResult.release(&m_evmcResult);
-        }
-    }
-
-    EVMCResult(EVMCResult&& evmcResult) noexcept : m_evmcResult(evmcResult.m_evmcResult)
-    {
-        evmcResult.m_evmcResult.release = nullptr;
-    }
-    EVMCResult& operator=(EVMCResult&& evmcResult) noexcept
-    {
-        m_evmcResult = evmcResult.m_evmcResult;
-        evmcResult.m_evmcResult.release = nullptr;
-        return *this;
-    }
-    EVMCResult(EVMCResult const&) = delete;
-    EVMCResult& operator=(EVMCResult const&) = delete;
-
-    evmc_result m_evmcResult;
+    void operator()(evmc_vm* ptr) const noexcept;
 };
-
-struct EVMCMessage : public evmc_message
-{
-};
-
-/// Translate the VMSchedule to VMInstance-C revision.
-evmc_revision toRevision(VMSchedule const& _schedule)
-{
-    if (_schedule.enableLondon)
-        return EVMC_LONDON;
-    if (_schedule.enableIstanbul)
-        return EVMC_ISTANBUL;
-    if (_schedule.haveCreate2)
-        return EVMC_CONSTANTINOPLE;
-    if (_schedule.haveRevert)
-        return EVMC_BYZANTIUM;
-    if (_schedule.eip158Mode)
-        return EVMC_SPURIOUS_DRAGON;
-    if (_schedule.eip150Mode)
-        return EVMC_TANGERINE_WHISTLE;
-    if (_schedule.haveDelegateCall)
-        return EVMC_HOMESTEAD;
-    return EVMC_FRONTIER;
-}
 
 /// The RAII wrapper for an VMInstance-C instance.
 class VMInstance
 {
+private:
+    std::shared_ptr<evmone::baseline::CodeAnalysis const> m_instance;
+
 public:
-    explicit VMInstance(evmc_vm* _instance) noexcept : m_instance(_instance)
-    {
-        assert(m_instance);
-        // the abi_version of intepreter is EVMC_ABI_VERSION when callback VMFactory::create()
-        assert(m_instance->abi_version == EVMC_ABI_VERSION);
+    explicit VMInstance(std::shared_ptr<evmone::baseline::CodeAnalysis const> instance) noexcept;
+    ~VMInstance() noexcept = default;
 
-        // Set the options.
-        if (m_instance->set_option != nullptr)
-        {
-            // TODO: set some options
-        }
-    }
-
-    ~VMInstance() noexcept { m_instance->destroy(m_instance); }
     VMInstance(VMInstance const&) = delete;
-    VMInstance& operator=(VMInstance) = delete;
+    VMInstance(VMInstance&&) noexcept = default;
+    VMInstance& operator=(VMInstance const&) = delete;
+    VMInstance& operator=(VMInstance&&) noexcept = default;
 
     EVMCResult execute(const struct evmc_host_interface* host, struct evmc_host_context* context,
-        evmc_revision rev, evmc_message* msg, const uint8_t* code, size_t codeSize)
-    {
-        EVMCResult evmcResult;
-        evmcResult.m_evmcResult =
-            m_instance->execute(m_instance, host, context, rev, msg, code, codeSize);
-        return evmcResult;
-    }
+        evmc_revision rev, const evmc_message* msg, const uint8_t* code, size_t codeSize);
 
-    void enableDebugOutput() {}
-
-private:
-    /// The VM instance created with VMInstance-C <prefix>_create() function.
-    evmc_vm* m_instance = nullptr;
+    void enableDebugOutput();
 };
 
 }  // namespace bcos::transaction_executor
+
+template <>
+struct std::equal_to<evmc_address>
+{
+    bool operator()(const evmc_address& lhs, const evmc_address& rhs) const noexcept;
+};
+
+template <>
+struct boost::hash<evmc_address>
+{
+    size_t operator()(const evmc_address& address) const noexcept;
+};
+
+template <>
+struct std::hash<evmc_address>
+{
+    size_t operator()(const evmc_address& address) const noexcept;
+};

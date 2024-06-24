@@ -21,11 +21,8 @@
 #pragma once
 #include "BlockHeader.h"
 #include "Transaction.h"
-#include "TransactionFactory.h"
 #include "TransactionMetaData.h"
 #include "TransactionReceipt.h"
-#include "TransactionReceiptFactory.h"
-#include <range/v3/view/transform.hpp>
 
 namespace bcos::protocol
 {
@@ -109,7 +106,7 @@ public:
     virtual NonceListPtr nonces() const
     {
         return std::make_shared<NonceList>(
-            RANGES::iota_view<uint64_t, uint64_t>(0LU, transactionsSize()) |
+            RANGES::iota_view<size_t, size_t>(0LU, transactionsSize()) |
             RANGES::views::transform([this](uint64_t index) {
                 auto transaction = this->transaction(index);
                 return transaction->nonce();
@@ -119,4 +116,5 @@ public:
 };
 using Blocks = std::vector<Block::Ptr>;
 using BlocksPtr = std::shared_ptr<Blocks>;
+
 }  // namespace bcos::protocol

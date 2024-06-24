@@ -37,6 +37,16 @@ using namespace bcos::crypto;
 using namespace bcos::precompiled;
 using namespace bcos::executor;
 using namespace bcos::storage;
+
+#ifndef WITH_WASM
+namespace bcos::wasm
+{
+class GasInjector
+{
+};
+}  // namespace bcos::wasm
+#endif
+
 namespace bcos::test
 {
 class VRFPrecompiledFixture
@@ -62,7 +72,7 @@ public:
                 h256(), utcTime(), _blockVersion, FiscoBcosSchedule, false, false);
         m_executive =
             std::make_shared<TransactionExecutive>(*m_blockContext, "", 100, 0, m_gasInjector);
-        m_abi = std::make_shared<bcos::codec::abi::ContractABICodec>(m_cryptoSuite->hashImpl());
+        m_abi = std::make_shared<bcos::codec::abi::ContractABICodec>(*m_cryptoSuite->hashImpl());
     }
 
     ~VRFPrecompiledFixture() {}

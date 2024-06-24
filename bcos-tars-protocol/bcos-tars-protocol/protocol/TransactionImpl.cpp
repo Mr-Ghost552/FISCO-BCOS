@@ -19,10 +19,9 @@
  * @date 2021-04-20
  */
 
+#include "TransactionImpl.h"
 #include "../impl/TarsHashable.h"
 #include "../impl/TarsSerializable.h"
-
-#include "TransactionImpl.h"
 #include "bcos-concepts/Exception.h"
 #include <bcos-concepts/Hash.h>
 #include <bcos-concepts/Serialize.h>
@@ -59,6 +58,11 @@ bcos::crypto::HashType TransactionImpl::hash() const
     return hashResult;
 }
 
+void bcostars::protocol::TransactionImpl::calculateHash(const bcos::crypto::Hash& hashImpl)
+{
+    bcos::concepts::hash::calculate(*m_inner(), hashImpl.hasher(), m_inner()->dataHash);
+}
+
 const std::string& TransactionImpl::nonce() const
 {
     return m_inner()->data.nonce;
@@ -66,6 +70,119 @@ const std::string& TransactionImpl::nonce() const
 
 bcos::bytesConstRef TransactionImpl::input() const
 {
-    return bcos::bytesConstRef(reinterpret_cast<const bcos::byte*>(m_inner()->data.input.data()),
-        m_inner()->data.input.size());
+    return {reinterpret_cast<const bcos::byte*>(m_inner()->data.input.data()),
+        m_inner()->data.input.size()};
+}
+int32_t bcostars::protocol::TransactionImpl::version() const
+{
+    return m_inner()->data.version;
+}
+std::string_view bcostars::protocol::TransactionImpl::chainId() const
+{
+    return m_inner()->data.chainID;
+}
+std::string_view bcostars::protocol::TransactionImpl::groupId() const
+{
+    return m_inner()->data.groupID;
+}
+int64_t bcostars::protocol::TransactionImpl::blockLimit() const
+{
+    return m_inner()->data.blockLimit;
+}
+void bcostars::protocol::TransactionImpl::setNonce(std::string _n)
+{
+    m_inner()->data.nonce = std::move(_n);
+}
+std::string_view bcostars::protocol::TransactionImpl::to() const
+{
+    return m_inner()->data.to;
+}
+std::string_view bcostars::protocol::TransactionImpl::abi() const
+{
+    return m_inner()->data.abi;
+}
+
+std::string_view bcostars::protocol::TransactionImpl::value() const
+{
+    return m_inner()->data.value;
+}
+
+std::string_view bcostars::protocol::TransactionImpl::gasPrice() const
+{
+    return m_inner()->data.gasPrice;
+}
+
+int64_t bcostars::protocol::TransactionImpl::gasLimit() const
+{
+    return m_inner()->data.gasLimit;
+}
+
+std::string_view bcostars::protocol::TransactionImpl::maxFeePerGas() const
+{
+    return m_inner()->data.maxFeePerGas;
+}
+
+std::string_view bcostars::protocol::TransactionImpl::maxPriorityFeePerGas() const
+{
+    return m_inner()->data.maxPriorityFeePerGas;
+}
+
+bcos::bytesConstRef bcostars::protocol::TransactionImpl::extension() const
+{
+    return {reinterpret_cast<const bcos::byte*>(m_inner()->data.extension.data()),
+        m_inner()->data.extension.size()};
+}
+
+int64_t bcostars::protocol::TransactionImpl::importTime() const
+{
+    return m_inner()->importTime;
+}
+void bcostars::protocol::TransactionImpl::setImportTime(int64_t _importTime)
+{
+    m_inner()->importTime = _importTime;
+}
+bcos::bytesConstRef bcostars::protocol::TransactionImpl::signatureData() const
+{
+    return {reinterpret_cast<const bcos::byte*>(m_inner()->signature.data()),
+        m_inner()->signature.size()};
+}
+std::string_view bcostars::protocol::TransactionImpl::sender() const
+{
+    return {m_inner()->sender.data(), m_inner()->sender.size()};
+}
+void bcostars::protocol::TransactionImpl::forceSender(const bcos::bytes& _sender) const
+{
+    m_inner()->sender.assign(_sender.begin(), _sender.end());
+}
+void bcostars::protocol::TransactionImpl::setSignatureData(bcos::bytes& signature)
+{
+    m_inner()->signature.assign(signature.begin(), signature.end());
+}
+int32_t bcostars::protocol::TransactionImpl::attribute() const
+{
+    return m_inner()->attribute;
+}
+void bcostars::protocol::TransactionImpl::setAttribute(int32_t attribute)
+{
+    m_inner()->attribute = attribute;
+}
+std::string_view bcostars::protocol::TransactionImpl::extraData() const
+{
+    return m_inner()->extraData;
+}
+void bcostars::protocol::TransactionImpl::setExtraData(std::string const& _extraData)
+{
+    m_inner()->extraData = _extraData;
+}
+const bcostars::Transaction& bcostars::protocol::TransactionImpl::inner() const
+{
+    return *m_inner();
+}
+bcostars::Transaction& bcostars::protocol::TransactionImpl::mutableInner()
+{
+    return *m_inner();
+}
+void bcostars::protocol::TransactionImpl::setInner(bcostars::Transaction inner)
+{
+    *m_inner() = std::move(inner);
 }

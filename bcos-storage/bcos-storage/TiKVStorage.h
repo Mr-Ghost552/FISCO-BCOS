@@ -24,6 +24,7 @@
 #include <bcos-framework/storage/StorageInterface.h>
 #include <bcos-utilities/Common.h>
 #include <atomic>
+#include <memory>
 #include <utility>
 
 namespace tikv_client
@@ -77,10 +78,12 @@ public:
     void asyncRollback(const bcos::protocol::TwoPCParams& params,
         std::function<void(Error::Ptr)> callback) noexcept override;
 
-    Error::Ptr setRows(std::string_view table,
-        const std::variant<const gsl::span<std::string_view const>,
-            const gsl::span<std::string const>>& keys,
-        std::variant<gsl::span<const std::string_view>, gsl::span<std::string const>>
+    Error::Ptr setRows(std::string_view tableName,
+        RANGES::any_view<std::string_view,
+            RANGES::category::random_access | RANGES::category::sized>
+            keys,
+        RANGES::any_view<std::string_view,
+            RANGES::category::random_access | RANGES::category::sized>
             values) noexcept override;
     virtual Error::Ptr deleteRows(
         std::string_view, const std::variant<const gsl::span<std::string_view const>,
@@ -93,10 +96,13 @@ public:
 
 private:
     void triggerSwitch();
+    std::shared_ptr<tikv_client::Snapshot> getSnapshot();
 
     std::shared_ptr<tikv_client::TransactionClient> m_cluster;
     std::shared_ptr<tikv_client::Transaction> m_committer = nullptr;
     uint64_t m_currentStartTS = 0;
+    std::atomic_uint64_t m_lastCommittedTS = 0;
+
     std::function<void()> f_onNeedSwitchEvent;
     int32_t m_commitTimeout = 3000;
     std::chrono::time_point<std::chrono::system_clock> m_committerCreateTime;

@@ -17,21 +17,15 @@
 
 #pragma once
 
-#include "Log.h"
 #include "RefDataContainer.h"
+#include <boost/algorithm/hex.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
 #include <boost/thread.hpp>
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <functional>
 #include <map>
 #include <mutex>
-#include <set>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
+#include <type_traits>
 #include <vector>
 
 namespace bcos
@@ -102,43 +96,17 @@ inline u256 exp10()
 template <>
 inline u256 exp10<0>()
 {
-    return u256(1);
+    return u256{1};
 }
 
 //------------ Type interprets and Convertions----------------
 /// Interprets @a _u as a two's complement signed number and returns the resulting s256.
-inline s256 u2s(u256 _u)
-{
-    static const bigint c_end = bigint(1) << 256;
-    /// get the +/- symbols
-    if (boost::multiprecision::bit_test(_u, 255))
-        return s256(-(c_end - _u));
-    else
-        return s256(_u);
-}
+s256 u2s(u256 _u);
 
 /// @returns the two's complement signed representation of the signed number _u.
-inline u256 s2u(s256 _u)
-{
-    static const bigint c_end = bigint(1) << 256;
-    if (_u >= 0)
-        return u256(_u);
-    else
-        return u256(c_end + _u);
-}
+u256 s2u(s256 _u);
 
-inline bool isalNumStr(std::string const& _stringData)
-{
-    for (auto ch : _stringData)
-    {
-        if (isalnum(ch))
-        {
-            continue;
-        }
-        return false;
-    }
-    return true;
-}
+bool isalNumStr(std::string const& _stringData);
 
 inline bool isNumStr(std::string const& _stringData)
 {
@@ -157,25 +125,8 @@ inline bool isNumStr(std::string const& _stringData)
     return true;
 }
 
-inline constexpr double calcAvgRate(uint64_t _data, uint32_t _intervalMS)
-{
-    if (_intervalMS > 0)
-    {
-        auto avgRate = (double)_data * 8 * 1000 / 1024 / 1024 / _intervalMS;
-        return avgRate;
-    }
-    return 0;
-}
-
-inline constexpr uint32_t calcAvgQPS(uint64_t _requestCount, uint32_t _intervalMS)
-{
-    if (_intervalMS > 0)
-    {
-        auto qps = _requestCount * 1000 / _intervalMS;
-        return qps;
-    }
-    return 0;
-}
+double calcAvgRate(uint64_t _data, uint32_t _intervalMS);
+uint32_t calcAvgQPS(uint64_t _requestCount, uint32_t _intervalMS);
 
 // convert second to milliseconds
 inline constexpr int32_t toMillisecond(int32_t _seconds)
@@ -199,5 +150,31 @@ struct Exception;
 void errorExit(std::stringstream& _exitInfo, Exception const& exception);
 
 void pthread_setThreadName(std::string const& _n);
+std::string pthread_getThreadName();
 
 }  // namespace bcos
+
+namespace std
+{
+template <class BytesType>
+    requires std::same_as<BytesType, bcos::bytesConstRef> ||
+             (std::constructible_from<bcos::bytesConstRef, std::add_pointer_t<BytesType>> &&
+                 (!std::same_as<BytesType, std::string>) && (!std::same_as<BytesType, char>))
+inline ostream& operator<<(ostream& stream, const BytesType& bytes)
+{
+    bcos::bytesConstRef ref;
+    if constexpr (std::same_as<BytesType, bcos::bytesConstRef>)
+    {
+        ref = bytes;
+    }
+    else
+    {
+        ref = bcos::bytesConstRef{std::addressof(bytes)};
+    }
+    std::string hex;
+    hex.reserve(ref.size() * 2);
+    boost::algorithm::hex_lower(ref.begin(), ref.end(), std::back_insert_iterator(hex));
+    stream << "0x" << hex;
+    return stream;
+}
+}  // namespace std

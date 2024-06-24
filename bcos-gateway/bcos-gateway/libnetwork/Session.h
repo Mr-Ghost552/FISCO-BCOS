@@ -9,21 +9,15 @@
 #include "bcos-gateway/libnetwork/Message.h"
 #include "bcos-utilities/BoostLog.h"
 #include "bcos-utilities/Common.h"
-#include "bcos-utilities/CompositeBuffer.h"
 #include "bcos-utilities/Error.h"
 #include "bcos-utilities/ObjectCounter.h"
 #include <bcos-gateway/libnetwork/Common.h>
 #include <bcos-gateway/libnetwork/SessionCallback.h>
 #include <bcos-gateway/libnetwork/SessionFace.h>
-#include <bcos-utilities/Common.h>
 #include <bcos-utilities/Timer.h>
 #include <boost/heap/priority_queue.hpp>
-#include <array>
 #include <cstddef>
-#include <deque>
 #include <memory>
-#include <mutex>
-#include <set>
 #include <utility>
 
 namespace bcos
@@ -136,14 +130,14 @@ public:
     constexpr static const std::size_t MIN_SESSION_RECV_BUFFER_SIZE =
         static_cast<std::size_t>(512 * 1024);
 
-    Session(size_t _recvBufferSize = MIN_SESSION_RECV_BUFFER_SIZE);
+    Session(size_t _recvBufferSize = MIN_SESSION_RECV_BUFFER_SIZE, bool _forceSize = false);
 
     Session(const Session&) = delete;
     Session(Session&&) = delete;
     Session& operator=(Session&&) = delete;
     Session& operator=(const Session&) = delete;
 
-    ~Session() override;
+    ~Session() noexcept override;
 
     using Ptr = std::shared_ptr<Session>;
 
@@ -156,6 +150,8 @@ public:
     NodeIPEndpoint nodeIPEndpoint() const override;
 
     bool active() const override;
+
+    bool active(std::shared_ptr<bcos::gateway::Host>&) const;
 
     std::size_t writeQueueSize() override;
 
@@ -300,7 +296,6 @@ private:
     std::atomic<uint64_t> m_lastReadTime;
     std::atomic<uint64_t> m_lastWriteTime;
     std::shared_ptr<bcos::Timer> m_idleCheckTimer;
-
     std::string m_hostNodeID;
 };
 

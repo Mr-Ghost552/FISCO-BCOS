@@ -89,7 +89,8 @@ class KeyPageStorage : public virtual storage::StateStorageInterface
 public:
     using Ptr = std::shared_ptr<KeyPageStorage>;
 
-    explicit KeyPageStorage(std::shared_ptr<StorageInterface> _prev, size_t _pageSize = 10240,
+    explicit KeyPageStorage(std::shared_ptr<StorageInterface> _prev, bool setRowWithDirtyFlag,
+        size_t _pageSize = 10240,
         uint32_t _blockVersion = (uint32_t)bcos::protocol::BlockVersion::V3_0_VERSION,
         std::shared_ptr<const std::set<std::string, std::less<>>> _ignoreTables = nullptr,
         bool _ignoreNotExist = false)
@@ -100,7 +101,8 @@ public:
         m_mergeSize(m_pageSize / 4),
         m_buckets(std::thread::hardware_concurrency()),
         m_ignoreTables(std::move(_ignoreTables)),
-        m_ignoreNotExist(_ignoreNotExist)
+        m_ignoreNotExist(_ignoreNotExist),
+        m_setRowWithDirtyFlag(setRowWithDirtyFlag)
     {
         if (!m_ignoreTables)
         {
@@ -143,7 +145,8 @@ public:
                                               const std::string_view& key, const Entry& entry)>
                                               callback) const override;
 
-    crypto::HashType hash(const bcos::crypto::Hash::Ptr& hashImpl) const override;
+    crypto::HashType hash(
+        const bcos::crypto::Hash::Ptr& hashImpl, const ledger::Features& features) const override;
 
     void rollback(const Recoder& recoder) override;
 
@@ -271,6 +274,8 @@ public:
         TableMeta(const TableMeta& meta)
         {
             pages = std::make_unique<std::vector<PageInfo>>();
+            pages->reserve(meta.pages->size());
+            auto readLock = meta.rLock();
             *pages = *meta.pages;
         }
         TableMeta& operator=(const TableMeta& meta)
@@ -279,7 +284,7 @@ public:
             {
                 pages = std::make_unique<std::vector<PageInfo>>();
                 pages->reserve(meta.pages->size());
-                auto lock = std::shared_lock(meta.mutex);
+                auto readLock = meta.rLock();
                 *pages = *meta.pages;
             }
             return *this;
@@ -418,10 +423,10 @@ public:
                 }
                 else
                 {
-                    KeyPage_LOG(FATAL)
-                        << LOG_DESC("updatePageInfo not found")
-                        << LOG_KV("oldEndKey", toHex(oldEndKey)) << LOG_KV("endKey", toHex(pageKey))
-                        << LOG_KV("valid", count) << LOG_KV("size", size);
+                    KeyPage_LOG(FATAL) << LOG_DESC("updatePageInfo not found")
+                                       << LOG_KV("oldEndKey", toHex(oldEndKey))
+                                       << LOG_KV("pageKey", toHex(pageKey))
+                                       << LOG_KV("valid", count) << LOG_KV("size", size);
                 }
             }
             return oldPageKey;
@@ -459,8 +464,9 @@ public:
                 it->setPageData(nullptr);
                 if (it->getCount() == 0 || it->getPageKey().empty())
                 {
-                    KeyPage_LOG(DEBUG) << LOG_DESC("TableMeta clean empty page")
-                                       << LOG_KV("pageKey", toHex(it->getPageKey()));
+                    KeyPage_LOG(DEBUG)
+                        << LOG_DESC("TableMeta clean empty page") << LOG_KV("size", pages->size())
+                        << LOG_KV("pageKey", toHex(it->getPageKey()));
                     it = pages->erase(it);
                 }
                 else
@@ -520,7 +526,7 @@ public:
             // }
             int invalid = 0;
             m_rows = 0;
-            auto writeLock = rLock();
+            auto writeLock = lock();
             for (auto it = pages->begin(); it != pages->end();)
             {
                 if (it->getCount() == 0 || it->getPageKey().empty())
@@ -884,10 +890,10 @@ public:
             m_invalidPageKeys.clear();
             if (!entries.empty() && pageKey != entries.rbegin()->first)
             {
-                KeyPage_LOG(WARNING) << LOG_DESC("import page with invalid pageKey")
-                                     << LOG_KV("pageKey", toHex(pageKey))
-                                     << LOG_KV("validPageKey", toHex(entries.rbegin()->first))
-                                     << LOG_KV("count", entries.size());
+                KeyPage_LOG(DEBUG) << LOG_DESC("import page with invalid pageKey")
+                                   << LOG_KV("pageKey", toHex(pageKey))
+                                   << LOG_KV("validPageKey", toHex(entries.rbegin()->first))
+                                   << LOG_KV("count", entries.size());
                 m_invalidPageKeys.insert(std::string(pageKey));
             }
             if (entries.empty())
@@ -910,12 +916,12 @@ public:
                     bcos::crypto::HashType entryHash(0);
                     if (blockVersion >= (uint32_t)bcos::protocol::BlockVersion::V3_1_VERSION)
                     {
-                        entryHash = entry.second.hash(table, entry.first, hashImpl, blockVersion);
+                        entryHash = entry.second.hash(table, entry.first, *hashImpl, blockVersion);
                     }
                     else
                     {  // 3.0.0
                         entryHash = hash ^ hashImpl->hash(entry.first) ^
-                                    entry.second.hash(table, entry.first, hashImpl, blockVersion);
+                                    entry.second.hash(table, entry.first, *hashImpl, blockVersion);
                     }
                     // if (c_fileLogLevel <= TRACE)
                     // {
@@ -1022,6 +1028,7 @@ public:
         // if startKey changed the old startKey need keep to delete old page
         std::set<std::string> m_invalidPageKeys;
         TableMeta* m_meta = nullptr;
+
         template <class Archive>
         void save(Archive& ar, const unsigned int version) const
         {
@@ -1035,7 +1042,7 @@ public:
                     continue;
                 }
                 ++count;
-                ar& i.first;
+                ar & i.first;
                 auto value = i.second.get();
                 ar&(uint32_t)value.size();
                 ar.save_binary(value.data(), value.size());
@@ -1047,15 +1054,15 @@ public:
         {
             std::ignore = version;
             uint32_t count = 0;
-            ar& count;
+            ar & count;
             m_validCount = count;
             auto iter = entries.begin();
             for (size_t i = 0; i < m_validCount; ++i)
             {
                 std::string key;
-                ar& key;
+                ar & key;
                 uint32_t len = 0;
-                ar& len;
+                ar & len;
                 m_size += len;
                 m_size += key.size();
                 auto value = std::make_shared<std::vector<uint8_t>>(len, 0);
@@ -1168,7 +1175,9 @@ public:
         auto it = bucket->container.find(std::make_pair(std::string(table), std::string(key)));
         if (it != bucket->container.end())
         {
-            return std::make_optional(std::make_shared<Data>(*it->second));
+            // copy data also need clean
+            auto data = std::make_shared<Data>(*it->second);
+            return std::make_optional(std::move(data));
         }
         auto prevKeyPage = std::dynamic_pointer_cast<bcos::storage::KeyPageStorage>(getPrev());
         if (prevKeyPage)
@@ -1180,7 +1189,7 @@ public:
         {
             KeyPage_LOG(ERROR) << LOG_DESC("getData error") << LOG_KV("table", table)
                                << LOG_KV("key", toHex(key))
-                               << LOG_KV("error", error->errorMessage());
+                               << LOG_KV("message", error->errorMessage());
             return std::nullopt;
         }
         if (c_fileLogLevel <= TRACE)
@@ -1312,6 +1321,7 @@ private:
     std::vector<Bucket> m_buckets;
     std::shared_ptr<const std::set<std::string, std::less<>>> m_ignoreTables;
     bool m_ignoreNotExist = false;
+    bool m_setRowWithDirtyFlag = false;
 };
 
 }  // namespace bcos::storage
